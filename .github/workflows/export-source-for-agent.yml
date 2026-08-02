@@ -15,14 +15,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply implementation and commit
+      - name: Finalize implementation and commit
         shell: pwsh
         run: |
-          python tools/apply_native_rdp_feature.py
+          python tools/finalize_native_rdp_feature.py
           git config user.name "native-rdp-agent"
           git config user.email "native-rdp-agent@users.noreply.github.com"
           git add -A
           if (-not (git diff --cached --quiet)) {
-            git commit -m "feat: implement native mstsc launch [native-rdp-agent]"
+            git commit -m "feat: finalize native mstsc launch [native-rdp-agent]"
             git push origin HEAD:${{ github.ref_name }}
           }
