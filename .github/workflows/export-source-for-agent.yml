@@ -1,0 +1,28 @@
+name: Patch native RDP credential clear
+
+on:
+  push:
+    branches: [ agent/native-mstsc-launch ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[native-rdp-clear-agent]') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply credential clear patch
+        shell: pwsh
+        run: |
+          python tools/patch_native_rdp_credential_clear.py
+          git config user.name "native-rdp-clear-agent"
+          git config user.email "native-rdp-clear-agent@users.noreply.github.com"
+          git add -A
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "fix: clear native destination and gateway credentials [native-rdp-clear-agent]"
+            git push origin HEAD:${{ github.ref_name }}
+          }
