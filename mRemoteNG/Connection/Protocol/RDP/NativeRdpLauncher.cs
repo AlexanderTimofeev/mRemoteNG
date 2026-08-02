@@ -60,9 +60,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 foreach (string argument in BuildArguments(rdpPath, connectionInfo, force, prompt))
                     startInfo.ArgumentList.Add(argument);
 
-                Process? process = Process.Start(startInfo);
-                if (process == null)
-                    throw new InvalidOperationException("mstsc.exe did not return a process instance.");
+                using Process process = Process.Start(startInfo)
+                    ?? throw new InvalidOperationException("mstsc.exe did not return a process instance.");
 
                 TemporaryRdpFileStore.ScheduleDelete(rdpPath);
                 Runtime.MessageCollector.AddMessage(
@@ -102,14 +101,14 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return arguments;
         }
 
-        public static string BuildCredentialTarget(string hostname)
+        public static string BuildCredentialTarget(string? hostname)
         {
             string host = (hostname ?? string.Empty).Trim().TrimStart('[').TrimEnd(']');
             return $"TERMSRV/{host}";
         }
 
         private static void WriteCredentialIfAvailable(
-            string hostname,
+            string? hostname,
             RdpResolvedCredentials credentials)
         {
             if (!credentials.HasPassword)
@@ -146,7 +145,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 gatewayCredentials.Password);
         }
 
-        private static RdpResolvedCredentials BuildCredentialHint(string username, string domain)
+        private static RdpResolvedCredentials BuildCredentialHint(string? username, string? domain)
         {
             string normalizedUsername = username ?? string.Empty;
             string normalizedDomain = domain ?? string.Empty;
