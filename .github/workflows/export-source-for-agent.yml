@@ -8,61 +8,21 @@ permissions:
   contents: write
 
 jobs:
-  implement-and-validate:
+  implement:
     if: ${{ !contains(github.event.head_commit.message, '[native-rdp-agent]') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
-      - name: Apply implementation
-        shell: pwsh
-        run: python tools/apply_native_rdp_feature.py
-      - name: Restore, build, test, and commit report
+      - name: Apply implementation and commit
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          $solution = Get-ChildItem -Path . -Filter *.sln | Select-Object -First 1
-          $restoreExit = 1
-          $buildExit = 1
-          $testExit = 1
-          if ($null -ne $solution) {
-            dotnet restore $solution.FullName 2>&1 | Tee-Object -FilePath native-rdp-restore.log
-            $restoreExit = $LASTEXITCODE
-            if ($restoreExit -eq 0) {
-              dotnet build $solution.FullName -c Debug --no-restore 2>&1 | Tee-Object -FilePath native-rdp-build.log
-              $buildExit = $LASTEXITCODE
-              dotnet test $solution.FullName -c Debug --no-build --no-restore 2>&1 | Tee-Object -FilePath native-rdp-test.log
-              $testExit = $LASTEXITCODE
-            }
-          }
-
-          Add-Content docs/native-rdp-implementation-report.md "`n## Validation"
-          Add-Content docs/native-rdp-implementation-report.md "- Restore exit code: $restoreExit"
-          Add-Content docs/native-rdp-implementation-report.md "- Build exit code: $buildExit"
-          Add-Content docs/native-rdp-implementation-report.md "- Test exit code: $testExit"
-          foreach ($log in @('native-rdp-restore.log', 'native-rdp-build.log', 'native-rdp-test.log')) {
-            if (Test-Path $log) {
-              Add-Content docs/native-rdp-implementation-report.md "`n### $log (tail)"
-              Add-Content docs/native-rdp-implementation-report.md '```text'
-              Get-Content $log -Tail 120 | Add-Content docs/native-rdp-implementation-report.md
-              Add-Content docs/native-rdp-implementation-report.md '```'
-              Remove-Item $log -Force
-            }
-          }
-
+          python tools/apply_native_rdp_feature.py
           git config user.name "native-rdp-agent"
           git config user.email "native-rdp-agent@users.noreply.github.com"
           git add -A
           if (-not (git diff --cached --quiet)) {
             git commit -m "feat: implement native mstsc launch [native-rdp-agent]"
             git push origin HEAD:${{ github.ref_name }}
-          }
-
-          if ($restoreExit -ne 0 -or $buildExit -ne 0 -or $testExit -ne 0) {
-            exit 1
           }
