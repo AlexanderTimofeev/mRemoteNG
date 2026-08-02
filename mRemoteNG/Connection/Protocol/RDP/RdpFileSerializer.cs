@@ -11,7 +11,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
     /// </summary>
     public sealed class RdpFileSerializer
     {
-        public string Serialize(ConnectionInfo connectionInfo)
+        public static string Serialize(ConnectionInfo connectionInfo)
         {
             ArgumentNullException.ThrowIfNull(connectionInfo);
 
