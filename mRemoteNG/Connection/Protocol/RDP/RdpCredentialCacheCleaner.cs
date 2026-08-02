@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using mRemoteNG.App;
@@ -37,14 +38,35 @@ namespace mRemoteNG.Connection.Protocol.RDP
         }
 
         /// <summary>
-        /// Removes cached credentials for a destination hostname.
+        /// Removes cached destination credentials and any separate RD Gateway credentials used by
+        /// matching connections in the currently loaded tree.
         /// </summary>
         public static ClearCachedCredentialsResult ClearCachedCredentials(string hostname)
         {
             if (string.IsNullOrWhiteSpace(hostname))
                 return ClearCachedCredentialsResult.Failed;
 
-            return ClearTargets([NativeRdpLauncher.BuildCredentialTarget(hostname)]);
+            HashSet<string> targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                NativeRdpLauncher.BuildCredentialTarget(hostname)
+            };
+
+            IEnumerable<ConnectionInfo> matchingConnections =
+                Runtime.ConnectionsService.ConnectionTreeModel?.GetRecursiveChildList()
+                    .Where(connection =>
+                        string.Equals(connection.Hostname, hostname, StringComparison.OrdinalIgnoreCase))
+                ?? Enumerable.Empty<ConnectionInfo>();
+
+            foreach (ConnectionInfo connection in matchingConnections)
+            {
+                if (connection.RDGatewayUsageMethod != RDGatewayUsageMethod.Never &&
+                    !string.IsNullOrWhiteSpace(connection.RDGatewayHostname))
+                {
+                    targets.Add(NativeRdpLauncher.BuildCredentialTarget(connection.RDGatewayHostname));
+                }
+            }
+
+            return ClearTargets(targets);
         }
 
         /// <summary>
