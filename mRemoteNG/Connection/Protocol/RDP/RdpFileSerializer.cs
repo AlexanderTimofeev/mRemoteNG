@@ -25,17 +25,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddString(lines, "username", BuildUsername(connectionInfo));
             AddString(lines, "domain", connectionInfo.Domain);
 
-            string resolution = connectionInfo.Resolution.ToString();
-            AddInt(lines, "screen mode id", resolution.Equals("Fullscreen", StringComparison.OrdinalIgnoreCase) ? 2 : 1);
-            if (connectionInfo.ResolutionWidth > 0)
-                AddInt(lines, "desktopwidth", connectionInfo.ResolutionWidth);
-            if (connectionInfo.ResolutionHeight > 0)
-                AddInt(lines, "desktopheight", connectionInfo.ResolutionHeight);
-            AddInt(lines, "use multimon", Bool(connectionInfo.RDPUseMultimon));
-            AddInt(lines, "session bpp", ColorDepth(connectionInfo.Colors.ToString()));
-            int? desktopScaleFactor = DesktopScaleFactor(connectionInfo.DesktopScaleFactor);
-            if (desktopScaleFactor.HasValue)
-                AddInt(lines, "desktopscalefactor", desktopScaleFactor.Value);
+            AddDisplaySettings(lines, connectionInfo);
 
             AddInt(lines, "bitmapcachepersistenable", Bool(connectionInfo.CacheBitmaps));
             AddInt(lines, "disable wallpaper", Bool(!connectionInfo.DisplayWallpaper));
@@ -92,6 +82,48 @@ namespace mRemoteNG.Connection.Protocol.RDP
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(domain) || username.Contains('\\') || username.Contains('@'))
                 return username;
             return $"{domain}\\{username}";
+        }
+
+        private static void AddDisplaySettings(ICollection<string> lines, ConnectionInfo connectionInfo)
+        {
+            AddInt(lines, "screen mode id", connectionInfo.Resolution == RDPResolutions.Fullscreen ? 2 : 1);
+            AddInt(lines, "use multimon", Bool(connectionInfo.RDPUseMultimon));
+            AddInt(lines, "session bpp", ColorDepth(connectionInfo.Colors.ToString()));
+
+            bool smartSizing = connectionInfo.Resolution is RDPResolutions.SmartSize or RDPResolutions.SmartSizeAspect ||
+                               connectionInfo.RDPSizingMode is RDPSizingMode.SmartSize or RDPSizingMode.SmartSizeAspect;
+            AddInt(lines, "smart sizing", Bool(smartSizing));
+            AddInt(lines, "dynamic resolution", Bool(connectionInfo.AutomaticResize));
+
+            (int width, int height) = ResolveDesktopSize(connectionInfo);
+            if (width > 0)
+                AddInt(lines, "desktopwidth", width);
+            if (height > 0)
+                AddInt(lines, "desktopheight", height);
+
+            int? desktopScaleFactor = DesktopScaleFactor(connectionInfo.DesktopScaleFactor);
+            if (desktopScaleFactor.HasValue)
+                AddInt(lines, "desktopscalefactor", desktopScaleFactor.Value);
+        }
+
+        private static (int Width, int Height) ResolveDesktopSize(ConnectionInfo connectionInfo)
+        {
+            if (connectionInfo.Resolution == RDPResolutions.Custom)
+                return (connectionInfo.ResolutionWidth, connectionInfo.ResolutionHeight);
+
+            string name = connectionInfo.Resolution.ToString();
+            if (name.StartsWith("Res", StringComparison.Ordinal))
+            {
+                string[] parts = name[3..].Split('x', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2 &&
+                    int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int width) &&
+                    int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int height))
+                {
+                    return (width, height);
+                }
+            }
+
+            return (0, 0);
         }
 
         private static void AddDriveRedirection(ICollection<string> lines, ConnectionInfo connectionInfo)
