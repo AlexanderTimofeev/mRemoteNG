@@ -24,7 +24,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return path;
         }
 
-        public void ScheduleDelete(string path)
+        public static void ScheduleDelete(string path)
         {
             _ = Task.Run(async () =>
             {
