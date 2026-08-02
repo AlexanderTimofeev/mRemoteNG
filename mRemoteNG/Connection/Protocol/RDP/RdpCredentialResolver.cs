@@ -33,6 +33,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 connectionInfo.ExternalCredentialProvider,
                 connectionInfo.UserViaAPI,
                 connectionInfo,
+                connectionInfo.Hostname,
+                connectionInfo.Username,
                 ref username,
                 ref password,
                 ref domain);
@@ -78,6 +80,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 connectionInfo.RDGatewayExternalCredentialProvider,
                 connectionInfo.RDGatewayUserViaAPI,
                 connectionInfo,
+                connectionInfo.RDGatewayHostname,
+                connectionInfo.RDGatewayUsername,
                 ref username,
                 ref password,
                 ref domain);
@@ -105,15 +109,25 @@ namespace mRemoteNG.Connection.Protocol.RDP
             {
                 case "windows":
                     username = Environment.UserName;
-                    domain = string.IsNullOrEmpty(domain) ? Environment.UserDomainName : domain;
+                    if (string.IsNullOrEmpty(domain))
+                        domain = Environment.UserDomainName;
                     return;
                 case "custom":
                     username = OptionsCredentialsPage.Default.DefaultUsername ?? string.Empty;
-                    domain = string.IsNullOrEmpty(domain)
-                        ? OptionsCredentialsPage.Default.DefaultDomain ?? string.Empty
-                        : domain;
+                    if (string.IsNullOrEmpty(username))
+                    {
+                        ResolveDefaultExternalProvider(
+                            connectionInfo,
+                            ref username,
+                            ref password,
+                            ref domain);
+                    }
 
-                    if (!string.IsNullOrEmpty(OptionsCredentialsPage.Default.DefaultPassword))
+                    if (string.IsNullOrEmpty(domain))
+                        domain = OptionsCredentialsPage.Default.DefaultDomain ?? string.Empty;
+
+                    if (string.IsNullOrEmpty(password) &&
+                        !string.IsNullOrEmpty(OptionsCredentialsPage.Default.DefaultPassword))
                     {
                         LegacyRijndaelCryptographyProvider cryptographyProvider = new();
                         password = cryptographyProvider.Decrypt(
@@ -121,7 +135,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
                             Runtime.EncryptionKey);
                     }
 
-                    ResolveDefaultExternalProvider(connectionInfo, ref username, ref password, ref domain);
                     return;
             }
         }
@@ -137,13 +150,23 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 return;
 
             string apiReference = OptionsCredentialsPage.Default.UserViaAPIDefault ?? string.Empty;
-            ResolveExternalProvider(provider, apiReference, connectionInfo, ref username, ref password, ref domain);
+            ResolveExternalProvider(
+                provider,
+                apiReference,
+                connectionInfo,
+                connectionInfo.Hostname,
+                connectionInfo.Username,
+                ref username,
+                ref password,
+                ref domain);
         }
 
         private static void ResolveExternalProvider(
             ExternalCredentialProvider provider,
             string apiReference,
             ConnectionInfo connectionInfo,
+            string targetHostname,
+            string vaultFallbackUsername,
             ref string username,
             ref string password,
             ref string domain)
@@ -176,7 +199,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         if (connectionInfo.VaultOpenbaoSecretEngine == VaultOpenbaoSecretEngine.Kv &&
                             string.IsNullOrEmpty(username))
                         {
-                            username = connectionInfo.Username ?? string.Empty;
+                            username = vaultFallbackUsername ?? string.Empty;
                         }
 
                         ExternalConnectors.VO.VaultOpenbao.ReadPasswordRDP(
@@ -188,7 +211,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         break;
                     case ExternalCredentialProvider.LAPS:
                         ExternalConnectors.LAPS.LAPSHelper.QueryLAPSPassword(
-                            connectionInfo.Hostname, out username, out password, out domain);
+                            targetHostname, out username, out password, out domain);
                         break;
                     default:
                         throw new NotSupportedException(
