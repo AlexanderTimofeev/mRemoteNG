@@ -35,6 +35,37 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
             Assert.That(result, Does.Not.Contain("password 51"));
         }
 
+        [TestCase(RDPDesktopScaleFactor.Scale100, 100)]
+        [TestCase(RDPDesktopScaleFactor.Scale125, 125)]
+        [TestCase(RDPDesktopScaleFactor.Scale150, 150)]
+        [TestCase(RDPDesktopScaleFactor.Scale200, 200)]
+        public void SerializeMapsDesktopScaleFactorToPercentage(RDPDesktopScaleFactor scaleFactor, int expected)
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                DesktopScaleFactor = scaleFactor
+            };
+
+            string result = RdpFileSerializer.Serialize(connectionInfo);
+
+            Assert.That(result, Does.Contain($"desktopscalefactor:i:{expected}"));
+        }
+
+        [Test]
+        public void SerializeOmitsDesktopScaleFactorWhenAuto()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                DesktopScaleFactor = RDPDesktopScaleFactor.Auto
+            };
+
+            string result = RdpFileSerializer.Serialize(connectionInfo);
+
+            Assert.That(result, Does.Not.Contain("desktopscalefactor"));
+        }
+
         [Test]
         public void NativeModeCanBeStoredOnConnection()
         {
