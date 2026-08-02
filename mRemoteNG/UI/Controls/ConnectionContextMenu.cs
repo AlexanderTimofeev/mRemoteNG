@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
@@ -1575,7 +1575,7 @@ namespace mRemoteNG.UI.Controls
 
             if (confirm != DialogResult.Yes) return;
 
-            ClearCachedCredentialsResult outcome = RdpCredentialCacheCleaner.ClearCachedCredentials(hostname);
+            ClearCachedCredentialsResult outcome = RdpCredentialCacheCleaner.ClearCachedCredentials(selected);
             (string message, ESysIcons icon) = outcome switch
             {
                 ClearCachedCredentialsResult.Deleted =>
