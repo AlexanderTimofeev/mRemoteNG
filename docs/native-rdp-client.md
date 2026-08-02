@@ -34,7 +34,7 @@ The native launcher is not a `ProtocolBase` implementation because `ProtocolBase
 
 ### `RdpFileSerializer`
 
-Serializes the effective `ConnectionInfo` into a deterministic UTF-8 `.rdp` file. The file never contains the plaintext password or a `password 51` blob.
+Serializes the effective `ConnectionInfo` into a deterministic UTF-16LE `.rdp` file. The file never contains the plaintext password or a `password 51` blob.
 
 Supported property groups include:
 

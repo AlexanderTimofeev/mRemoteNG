@@ -1,33 +1,20 @@
 # Native RDP implementation report
 
-## Changed files
-- `mRemoteNGTests\Connection\Protocol\RDP\RdpFileSerializerTests.cs`
-- `mRemoteNG\Config\Serializers\ConnectionSerializers\Xml\RdpClientModeXmlPersistence.cs`
-- `mRemoteNG\Config\Serializers\ConnectionSerializers\Xml\XmlConnectionNodeSerializer28.cs`
-- `mRemoteNG\Connection\AbstractConnectionRecord.cs`
-- `mRemoteNG\Connection\Protocol\RDP\NativeRdpLauncher.cs`
-- `mRemoteNG\Connection\Protocol\RDP\RdpClientMode.cs`
-- `mRemoteNG\Connection\Protocol\RDP\RdpFileSerializer.cs`
-- `mRemoteNG\Connection\Protocol\RDP\TemporaryRdpFileStore.cs`
-- `mRemoteNG\Connection\Protocol\RDP\WindowsCredentialManager.cs`
-- `mRemoteNG\Schemas\mremoteng_confcons_v2_8.xsd`
+## Finalizer changes
+- `mRemoteNG\Config\Serializers\ConnectionSerializers\Xml\XmlConnectionsDeserializer.cs`
+- `mRemoteNG\Connection\ConnectionInitiator.cs`
+- `mRemoteNG\Config\Serializers\ConnectionSerializers\Xml\RdpClientModeXmlPersistence.cs (removed)`
+- `docs\native-rdp-client.md`
 
-## Notes
-- Deserializer candidate not patchable automatically: mRemoteNG\Config\Serializers\ConnectionSerializers\Xml\XmlConnectionsDeserializer.cs
+## Persistence behavior
+- XML serializer writes optional `RdpClientMode`.
+- XML deserializer uses `Embedded` when the attribute is absent or invalid.
+- The setting is intentionally not inherited in the first implementation.
 
-## Patcher errors
-- Could not patch XML deserializer. Candidates:
-### mRemoteNG\Config\Serializers\ConnectionSerializers\Xml\XmlConnectionsDeserializer.cs
-```csharp
-gine.Kv);
-                    connectionInfo.EC2InstanceId = a.GetAttr("EC2InstanceId");
-                    connectionInfo.EC2Region = a.GetAttr("EC2Region");
-                    connectionInfo.UseRestrictedAdmin = a.GetAttrBool("UseRestrictedAdmin");
-                    connectionInfo.Inheritance.UseRestrictedAdmin = a.GetAttrBool("InheritUseRestrictedAdmin");
-                    connectionInfo.UseRCG = a.GetAttrBool("UseRCG");
-                    connectionInfo.Inheritance.UseRCG = a.GetAttrBool("InheritUseRCG");
-                    connectionInfo.UseRedirectionServerName = a.GetAttrBool("UseRedirectionServerName");
-                    connectionInfo.Inheritance.UseRedirectionServerName = a.GetAttrBool("InheritUseRedirectionServerName");
-                    connectionInfo.RDGatewayExternalCredentialProvider = a.GetAttrEnum("RDGatewayExternalCredentialProvider", ExternalCredentialProvider.None);
-                    connectionInfo.RDGatewayUserViaAPI = a.GetAttr("RDGatewayUserViaAPI")
-```
+## Native launch behavior
+- Native mode is selected immediately after effective connection preparation and the pre-connection external app.
+- No panel, tab, protocol instance, or ActiveX control is created for native mode.
+- mRemoteNG-managed SSH tunnels are rejected with an actionable warning until their lifetime is decoupled from embedded tabs.
+
+## Validation
+- Build and test results are provided by the repository PR_Validation workflow.

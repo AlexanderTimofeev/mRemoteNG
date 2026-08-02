@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics; // Added
 using System.Globalization;
@@ -678,6 +678,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Xml
                     connectionInfo.ShowBrowserNavigationBar = a.GetAttrBool("ShowBrowserNavigationBar");
                     connectionInfo.HttpPath = a.GetAttr("HttpPath");
                     connectionInfo.AlwaysPromptForCredentials = a.GetAttrBool("AlwaysPromptForCredentials");
+                    connectionInfo.RdpClientMode = a.GetAttrEnum("RdpClientMode", RdpClientMode.Embedded);
                     connectionInfo.Inheritance.IPAddress = a.GetAttrBool("InheritIPAddress");
                     connectionInfo.Inheritance.ConnectionAddressPrimary = a.GetAttrBool("InheritConnectionAddressPrimary");
                     connectionInfo.Inheritance.RDPSizingMode = a.GetAttrBool("InheritRDPSizingMode");
