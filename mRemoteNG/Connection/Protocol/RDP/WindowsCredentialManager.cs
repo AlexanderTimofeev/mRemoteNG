@@ -10,7 +10,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private const uint CredTypeGeneric = 1;
         private const uint CredPersistLocalMachine = 2;
 
-        public void Write(string targetName, string username, string password)
+        public static void Write(string targetName, string username, string password)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
             ArgumentException.ThrowIfNullOrWhiteSpace(username);
@@ -49,7 +49,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
         }
 
-        public void Delete(string targetName)
+        public static void Delete(string targetName)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
             if (!CredDeleteW(targetName, CredTypeGeneric, 0))
