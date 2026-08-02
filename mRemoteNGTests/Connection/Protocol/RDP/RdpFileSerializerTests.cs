@@ -26,7 +26,7 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
                 Password = "secret-value"
             };
 
-            string result = new RdpFileSerializer().Serialize(connectionInfo);
+            string result = RdpFileSerializer.Serialize(connectionInfo);
 
             Assert.That(result, Does.Contain("full address:s:rdp.example.test:3391"));
             Assert.That(result, Does.Contain("server port:i:3391"));
