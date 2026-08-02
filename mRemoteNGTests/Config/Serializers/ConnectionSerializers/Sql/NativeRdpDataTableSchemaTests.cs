@@ -1,7 +1,10 @@
+using System;
 using System.Linq;
 using System.Security;
+using mRemoteNG.Config;
 using mRemoteNG.Config.Serializers.ConnectionSerializers.Sql;
 using mRemoteNG.Connection;
+using mRemoteNG.Connection.Protocol;
 using mRemoteNG.Connection.Protocol.RDP;
 using mRemoteNG.Security.SymmetricEncryption;
 using mRemoteNG.Tree;
@@ -39,7 +42,8 @@ namespace mRemoteNGTests.Config.Serializers.ConnectionSerializers.Sql
 
             DataTableDeserializer deserializer = new(cryptographyProvider, key);
             ConnectionTreeModel result = deserializer.Deserialize(table);
-            ConnectionInfo restored = result.GetRecursiveChildList().Single(x => x.ConstantID == source.ConstantID);
+            ConnectionInfo restored = result.GetRecursiveChildList().Single(
+                x => string.Equals(x.ConstantID, source.ConstantID, StringComparison.Ordinal));
 
             Assert.That(restored.RdpClientMode, Is.EqualTo(RdpClientMode.NativeMstsc));
         }
@@ -63,7 +67,8 @@ namespace mRemoteNGTests.Config.Serializers.ConnectionSerializers.Sql
 
             DataTableDeserializer deserializer = new(cryptographyProvider, key);
             ConnectionTreeModel result = deserializer.Deserialize(legacyTable);
-            ConnectionInfo restored = result.GetRecursiveChildList().Single(x => x.ConstantID == source.ConstantID);
+            ConnectionInfo restored = result.GetRecursiveChildList().Single(
+                x => string.Equals(x.ConstantID, source.ConstantID, StringComparison.Ordinal));
 
             Assert.That(restored.RdpClientMode, Is.EqualTo(RdpClientMode.Embedded));
         }
