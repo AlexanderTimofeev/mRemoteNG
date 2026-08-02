@@ -1,0 +1,24 @@
+name: Export source for native RDP implementation
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mremoteng-source
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          retention-days: 1
