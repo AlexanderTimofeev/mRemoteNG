@@ -88,9 +88,10 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
             };
 
             string result = RdpFileSerializer.Serialize(connectionInfo);
+            string lowerResult = result.ToLowerInvariant();
 
-            Assert.That(result, Does.Not.Contain("signscope", StringComparison.OrdinalIgnoreCase));
-            Assert.That(result, Does.Not.Contain("signature", StringComparison.OrdinalIgnoreCase));
+            Assert.That(lowerResult, Does.Not.Contain("signscope"));
+            Assert.That(lowerResult, Does.Not.Contain("signature"));
             Assert.That(result, Does.Not.Contain("invalid-after-regeneration"));
         }
 
