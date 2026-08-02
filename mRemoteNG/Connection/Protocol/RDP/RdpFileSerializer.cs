@@ -7,11 +7,24 @@ namespace mRemoteNG.Connection.Protocol.RDP
 {
     /// <summary>
     /// Converts the effective mRemoteNG RDP connection settings into an mstsc-compatible file.
-    /// Credentials are deliberately excluded and are supplied through Windows Credential Manager.
+    /// Passwords are deliberately excluded and are supplied through Windows Credential Manager.
     /// </summary>
     public sealed class RdpFileSerializer
     {
         public static string Serialize(ConnectionInfo connectionInfo)
+        {
+            ArgumentNullException.ThrowIfNull(connectionInfo);
+            RdpResolvedCredentials destinationCredentials = new(
+                connectionInfo.Username ?? string.Empty,
+                connectionInfo.Password ?? string.Empty,
+                connectionInfo.Domain ?? string.Empty);
+            return Serialize(connectionInfo, destinationCredentials, RdpResolvedCredentials.Empty);
+        }
+
+        public static string Serialize(
+            ConnectionInfo connectionInfo,
+            RdpResolvedCredentials destinationCredentials,
+            RdpResolvedCredentials gatewayCredentials)
         {
             ArgumentNullException.ThrowIfNull(connectionInfo);
 
@@ -22,8 +35,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
             if (connectionInfo.Port > 0)
                 AddInt(lines, "server port", connectionInfo.Port);
 
-            AddString(lines, "username", BuildUsername(connectionInfo));
-            AddString(lines, "domain", connectionInfo.Domain);
+            AddString(lines, "username", BuildUsername(destinationCredentials.Username, destinationCredentials.Domain));
+            AddString(lines, "domain", destinationCredentials.Domain);
 
             AddDisplaySettings(lines, connectionInfo);
 
@@ -56,14 +69,14 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddInt(lines, "enablerdsaadauth", Bool(connectionInfo.EnableRdsAadAuth));
             AddString(lines, "loadbalanceinfo", connectionInfo.LoadBalanceInfo);
 
-            AddGateway(lines, connectionInfo);
+            AddGateway(lines, connectionInfo, gatewayCredentials);
 
             AddString(lines, "alternate shell", connectionInfo.RDPStartProgram);
             AddString(lines, "shell working directory", connectionInfo.RDPStartProgramWorkDir);
             AddRemoteApp(lines, connectionInfo);
-            AddString(lines, "signscope", GetOptionalString(connectionInfo, "RDPSignScope"));
-            AddString(lines, "signature", GetOptionalString(connectionInfo, "RDPSignature"));
 
+            // A stored signature applies to the original RDP payload. Reusing it after regenerating
+            // the file would produce an invalid and misleading signature, so native files are unsigned.
             return string.Join("\r\n", lines) + "\r\n";
         }
 
@@ -77,11 +90,23 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         public static string BuildUsername(ConnectionInfo connectionInfo)
         {
-            string username = connectionInfo.Username?.Trim() ?? string.Empty;
-            string domain = connectionInfo.Domain?.Trim() ?? string.Empty;
-            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(domain) || username.Contains('\\') || username.Contains('@'))
-                return username;
-            return $"{domain}\\{username}";
+            ArgumentNullException.ThrowIfNull(connectionInfo);
+            return BuildUsername(connectionInfo.Username, connectionInfo.Domain);
+        }
+
+        public static string BuildUsername(string? username, string? domain)
+        {
+            string normalizedUsername = username?.Trim() ?? string.Empty;
+            string normalizedDomain = domain?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(normalizedUsername) ||
+                string.IsNullOrEmpty(normalizedDomain) ||
+                normalizedUsername.Contains('\\') ||
+                normalizedUsername.Contains('@'))
+            {
+                return normalizedUsername;
+            }
+
+            return $"{normalizedDomain}\\{normalizedUsername}";
         }
 
         private static void AddDisplaySettings(ICollection<string> lines, ConnectionInfo connectionInfo)
@@ -141,7 +166,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddString(lines, "drivestoredirect", string.IsNullOrEmpty(custom) ? "*" : custom);
         }
 
-        private static void AddGateway(ICollection<string> lines, ConnectionInfo connectionInfo)
+        private static void AddGateway(
+            ICollection<string> lines,
+            ConnectionInfo connectionInfo,
+            RdpResolvedCredentials gatewayCredentials)
         {
             string usage = connectionInfo.RDGatewayUsageMethod.ToString();
             int usageValue = usage switch
@@ -163,6 +191,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 _ => 4
             };
             AddInt(lines, "gatewaycredentialssource", sourceValue);
+            AddInt(lines, "promptcredentialonce", Bool(connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.Yes));
+            AddString(lines, "gatewayusername", BuildUsername(gatewayCredentials.Username, gatewayCredentials.Domain));
             AddString(lines, "gatewayaccesstoken", connectionInfo.RDGatewayAccessToken);
         }
 
