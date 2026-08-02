@@ -61,7 +61,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 if (process == null)
                     throw new InvalidOperationException("mstsc.exe did not return a process instance.");
 
-                _fileStore.ScheduleDelete(rdpPath);
+                TemporaryRdpFileStore.ScheduleDelete(rdpPath);
                 Runtime.MessageCollector.AddMessage(
                     MessageClass.InformationMsg,
                     string.Format(CultureInfo.InvariantCulture, "Opened native RDP connection '{0}' using mstsc.exe.", connectionInfo.Name));
