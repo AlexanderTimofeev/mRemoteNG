@@ -9,23 +9,16 @@ namespace mRemoteNG.Connection.Protocol.RDP
 {
     public sealed class NativeRdpLauncher
     {
-        private readonly RdpFileSerializer _serializer;
         private readonly TemporaryRdpFileStore _fileStore;
-        private readonly WindowsCredentialManager _credentialManager;
 
         public NativeRdpLauncher()
-            : this(new RdpFileSerializer(), new TemporaryRdpFileStore(), new WindowsCredentialManager())
+            : this(new TemporaryRdpFileStore())
         {
         }
 
-        public NativeRdpLauncher(
-            RdpFileSerializer serializer,
-            TemporaryRdpFileStore fileStore,
-            WindowsCredentialManager credentialManager)
+        public NativeRdpLauncher(TemporaryRdpFileStore fileStore)
         {
-            _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
             _fileStore = fileStore ?? throw new ArgumentNullException(nameof(fileStore));
-            _credentialManager = credentialManager ?? throw new ArgumentNullException(nameof(credentialManager));
         }
 
         public bool Launch(ConnectionInfo connectionInfo, ConnectionInfo.Force force)
@@ -45,10 +38,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 {
                     string target = BuildCredentialTarget(connectionInfo.Hostname);
                     string username = RdpFileSerializer.BuildUsername(connectionInfo);
-                    _credentialManager.Write(target, username, connectionInfo.Password);
+                    WindowsCredentialManager.Write(target, username, connectionInfo.Password);
                 }
 
-                rdpPath = _fileStore.Create(_serializer.Serialize(connectionInfo));
+                rdpPath = _fileStore.Create(RdpFileSerializer.Serialize(connectionInfo));
                 ProcessStartInfo startInfo = new(executable)
                 {
                     UseShellExecute = false,
@@ -76,7 +69,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
             catch (Exception ex)
             {
-                _fileStore.TryDelete(rdpPath);
+                TemporaryRdpFileStore.TryDelete(rdpPath);
                 Runtime.MessageCollector.AddExceptionMessage("Unable to open the native Windows RDP client.", ex);
                 return false;
             }
