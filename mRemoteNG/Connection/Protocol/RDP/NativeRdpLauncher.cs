@@ -28,7 +28,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             string? rdpPath = null;
             try
             {
-                Validate(connectionInfo);
+                Validate(connectionInfo, force);
                 string executable = Path.Combine(Environment.SystemDirectory, "mstsc.exe");
                 if (!File.Exists(executable))
                     throw new FileNotFoundException("The native Windows Remote Desktop client was not found.", executable);
@@ -158,7 +158,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return new RdpResolvedCredentials(normalizedUsername, string.Empty, normalizedDomain);
         }
 
-        private static void Validate(ConnectionInfo connectionInfo)
+        private static void Validate(ConnectionInfo connectionInfo, ConnectionInfo.Force force)
         {
             if (string.IsNullOrWhiteSpace(connectionInfo.Hostname))
                 throw new InvalidOperationException("A hostname is required for native RDP launch.");
@@ -166,6 +166,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new InvalidOperationException($"The RDP port '{connectionInfo.Port}' is outside the valid range.");
             if (connectionInfo.UseRestrictedAdmin && connectionInfo.UseRCG)
                 throw new InvalidOperationException("Restricted Admin and Remote Credential Guard cannot be enabled at the same time.");
+            if (force.HasFlag(ConnectionInfo.Force.ViewOnly))
+                throw new NotSupportedException("View-only mode is not available in the native Windows RDP client. Use Embedded mode for this launch.");
         }
     }
 }
