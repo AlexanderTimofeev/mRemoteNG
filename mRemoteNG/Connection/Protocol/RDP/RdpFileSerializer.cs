@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 
 namespace mRemoteNG.Connection.Protocol.RDP
@@ -153,17 +155,42 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private static void AddDriveRedirection(ICollection<string> lines, ConnectionInfo connectionInfo)
         {
-            string mode = connectionInfo.RedirectDiskDrives.ToString();
-            bool enabled = !mode.Equals("None", StringComparison.OrdinalIgnoreCase);
-            AddInt(lines, "redirectdrives", Bool(enabled));
-            if (!enabled)
+            switch (connectionInfo.RedirectDiskDrives)
             {
-                AddString(lines, "drivestoredirect", string.Empty);
-                return;
+                case RDPDiskDrives.None:
+                    AddInt(lines, "redirectdrives", 0);
+                    return;
+                case RDPDiskDrives.All:
+                    AddInt(lines, "redirectdrives", 1);
+                    AddString(lines, "drivestoredirect", "*");
+                    return;
+                case RDPDiskDrives.Custom:
+                    string customDrives = NormalizeCustomDriveList(connectionInfo.RedirectDiskDrivesCustom);
+                    AddInt(lines, "redirectdrives", Bool(!string.IsNullOrEmpty(customDrives)));
+                    AddString(lines, "drivestoredirect", customDrives);
+                    return;
+                default:
+                    string localFixedDrives = string.Join(
+                        string.Empty,
+                        DriveInfo.GetDrives()
+                            .Where(drive => drive.DriveType == DriveType.Fixed)
+                            .Select(drive => $"{drive.Name.TrimEnd('\\')}\\;"));
+                    AddInt(lines, "redirectdrives", Bool(!string.IsNullOrEmpty(localFixedDrives)));
+                    AddString(lines, "drivestoredirect", localFixedDrives);
+                    return;
             }
+        }
 
-            string custom = connectionInfo.RedirectDiskDrivesCustom?.Trim() ?? string.Empty;
-            AddString(lines, "drivestoredirect", string.IsNullOrEmpty(custom) ? "*" : custom);
+        internal static string NormalizeCustomDriveList(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            IEnumerable<char> driveLetters = value
+                .ToUpperInvariant()
+                .Where(char.IsLetter)
+                .Distinct();
+            return string.Concat(driveLetters.Select(letter => $"{letter}:\\;"));
         }
 
         private static void AddGateway(
