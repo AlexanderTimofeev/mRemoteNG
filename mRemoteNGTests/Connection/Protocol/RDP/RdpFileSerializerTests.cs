@@ -36,6 +36,65 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
         }
 
         [Test]
+        public void SerializeUsesResolvedCredentialHintsInsteadOfStoredPlaceholders()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                Username = "stored-user",
+                Domain = "STORED"
+            };
+            RdpResolvedCredentials resolved = new("resolved-user", "resolved-secret", "RESOLVED");
+
+            string result = RdpFileSerializer.Serialize(
+                connectionInfo,
+                resolved,
+                RdpResolvedCredentials.Empty);
+
+            Assert.That(result, Does.Contain("username:s:RESOLVED\\resolved-user"));
+            Assert.That(result, Does.Contain("domain:s:RESOLVED"));
+            Assert.That(result, Does.Not.Contain("stored-user"));
+            Assert.That(result, Does.Not.Contain("resolved-secret"));
+        }
+
+        [Test]
+        public void SerializeWritesGatewayHintAndPromptOnceForSharedCredentials()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                RDGatewayUsageMethod = RDGatewayUsageMethod.Always,
+                RDGatewayHostname = "gateway.example.test",
+                RDGatewayUseConnectionCredentials = RDGatewayUseConnectionCredentials.Yes
+            };
+            RdpResolvedCredentials credentials = new("alice", "secret", "CONTOSO");
+
+            string result = RdpFileSerializer.Serialize(connectionInfo, credentials, credentials);
+
+            Assert.That(result, Does.Contain("gatewayhostname:s:gateway.example.test"));
+            Assert.That(result, Does.Contain("gatewayusername:s:CONTOSO\\alice"));
+            Assert.That(result, Does.Contain("promptcredentialonce:i:1"));
+            Assert.That(result, Does.Not.Contain("secret"));
+        }
+
+        [Test]
+        public void SerializeDoesNotReuseSignatureForRegeneratedFile()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                RDPSignScope = "Full Address,GatewayHostname",
+                RDPSignature = "invalid-after-regeneration"
+            };
+
+            string result = RdpFileSerializer.Serialize(connectionInfo);
+
+            Assert.That(result, Does.Not.Contain("signscope", StringComparison.OrdinalIgnoreCase));
+            Assert.That(result, Does.Not.Contain("signature", StringComparison.OrdinalIgnoreCase));
+            Assert.That(result, Does.Not.Contain("invalid-after-regeneration"));
+        }
+
+        [Test]
         public void SerializeMapsPredefinedResolution()
         {
             ConnectionInfo connectionInfo = new()
