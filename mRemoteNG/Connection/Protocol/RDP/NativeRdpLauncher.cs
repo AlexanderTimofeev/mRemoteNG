@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -32,30 +33,32 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 if (!File.Exists(executable))
                     throw new FileNotFoundException("The native Windows Remote Desktop client was not found.", executable);
 
-                bool prompt = force.HasFlag(ConnectionInfo.Force.NoCredentials) || connectionInfo.AlwaysPromptForCredentials;
-                bool credentialless = prompt || connectionInfo.UseRestrictedAdmin || connectionInfo.UseRCG;
-                if (!credentialless && !string.IsNullOrWhiteSpace(connectionInfo.Username) && !string.IsNullOrEmpty(connectionInfo.Password))
-                {
-                    string target = BuildCredentialTarget(connectionInfo.Hostname);
-                    string username = RdpFileSerializer.BuildUsername(connectionInfo);
-                    WindowsCredentialManager.Write(target, username, connectionInfo.Password);
-                }
+                bool integratedSecurity = connectionInfo.UseRestrictedAdmin || connectionInfo.UseRCG;
+                bool prompt = !integratedSecurity &&
+                              (force.HasFlag(ConnectionInfo.Force.NoCredentials) || connectionInfo.AlwaysPromptForCredentials);
 
-                rdpPath = _fileStore.Create(RdpFileSerializer.Serialize(connectionInfo));
+                RdpResolvedCredentials destinationCredentials = integratedSecurity || prompt
+                    ? BuildCredentialHint(connectionInfo.Username, connectionInfo.Domain)
+                    : RdpCredentialResolver.ResolveDestination(connectionInfo, force);
+
+                RdpResolvedCredentials gatewayCredentials = integratedSecurity || prompt
+                    ? RdpResolvedCredentials.Empty
+                    : RdpCredentialResolver.ResolveGateway(connectionInfo, destinationCredentials, force);
+
+                WriteCredentialIfAvailable(connectionInfo.Hostname, destinationCredentials);
+                WriteGatewayCredentialIfAvailable(connectionInfo, destinationCredentials, gatewayCredentials);
+
+                rdpPath = _fileStore.Create(
+                    RdpFileSerializer.Serialize(connectionInfo, destinationCredentials, gatewayCredentials));
+
                 ProcessStartInfo startInfo = new(executable)
                 {
                     UseShellExecute = false,
                     WorkingDirectory = Environment.SystemDirectory
                 };
-                startInfo.ArgumentList.Add(rdpPath);
-                if (connectionInfo.UseConsoleSession)
-                    startInfo.ArgumentList.Add("/admin");
-                if (connectionInfo.UseRestrictedAdmin)
-                    startInfo.ArgumentList.Add("/restrictedAdmin");
-                if (connectionInfo.UseRCG)
-                    startInfo.ArgumentList.Add("/remoteGuard");
-                if (prompt)
-                    startInfo.ArgumentList.Add("/prompt");
+
+                foreach (string argument in BuildArguments(rdpPath, connectionInfo, force, prompt))
+                    startInfo.ArgumentList.Add(argument);
 
                 Process? process = Process.Start(startInfo);
                 if (process == null)
@@ -75,10 +78,84 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
         }
 
+        internal static IReadOnlyList<string> BuildArguments(
+            string rdpPath,
+            ConnectionInfo connectionInfo,
+            ConnectionInfo.Force force,
+            bool prompt)
+        {
+            List<string> arguments = [rdpPath];
+
+            bool useAdmin = force.HasFlag(ConnectionInfo.Force.UseConsoleSession) ||
+                            (!force.HasFlag(ConnectionInfo.Force.DontUseConsoleSession) && connectionInfo.UseConsoleSession);
+            if (useAdmin)
+                arguments.Add("/admin");
+            if (force.HasFlag(ConnectionInfo.Force.Fullscreen))
+                arguments.Add("/f");
+            if (connectionInfo.UseRestrictedAdmin)
+                arguments.Add("/restrictedAdmin");
+            if (connectionInfo.UseRCG)
+                arguments.Add("/remoteGuard");
+            if (prompt)
+                arguments.Add("/prompt");
+
+            return arguments;
+        }
+
         public static string BuildCredentialTarget(string hostname)
         {
             string host = (hostname ?? string.Empty).Trim().TrimStart('[').TrimEnd(']');
             return $"TERMSRV/{host}";
+        }
+
+        private static void WriteCredentialIfAvailable(
+            string hostname,
+            RdpResolvedCredentials credentials)
+        {
+            if (!credentials.HasPassword)
+                return;
+
+            WindowsCredentialManager.Write(
+                BuildCredentialTarget(hostname),
+                RdpFileSerializer.BuildUsername(credentials.Username, credentials.Domain),
+                credentials.Password);
+        }
+
+        private static void WriteGatewayCredentialIfAvailable(
+            ConnectionInfo connectionInfo,
+            RdpResolvedCredentials destinationCredentials,
+            RdpResolvedCredentials gatewayCredentials)
+        {
+            if (!gatewayCredentials.HasPassword || string.IsNullOrWhiteSpace(connectionInfo.RDGatewayHostname))
+                return;
+
+            string destinationTarget = BuildCredentialTarget(connectionInfo.Hostname);
+            string gatewayTarget = BuildCredentialTarget(connectionInfo.RDGatewayHostname);
+            bool sameTarget = string.Equals(destinationTarget, gatewayTarget, StringComparison.OrdinalIgnoreCase);
+            bool sameCredentials = gatewayCredentials.Equals(destinationCredentials);
+
+            // Credential Manager can hold only one generic credential for a target. If an unusual
+            // setup uses the destination host itself as a gateway with different credentials, keep
+            // the destination credential and allow mstsc to prompt for the gateway credential.
+            if (sameTarget && !sameCredentials)
+                return;
+
+            WindowsCredentialManager.Write(
+                gatewayTarget,
+                RdpFileSerializer.BuildUsername(gatewayCredentials.Username, gatewayCredentials.Domain),
+                gatewayCredentials.Password);
+        }
+
+        private static RdpResolvedCredentials BuildCredentialHint(string username, string domain)
+        {
+            string normalizedUsername = username ?? string.Empty;
+            string normalizedDomain = domain ?? string.Empty;
+            if (string.IsNullOrEmpty(normalizedDomain))
+            {
+                (normalizedUsername, normalizedDomain) = RdpProtocol.ParseDomainFromUsername(normalizedUsername);
+            }
+
+            return new RdpResolvedCredentials(normalizedUsername, string.Empty, normalizedDomain);
         }
 
         private static void Validate(ConnectionInfo connectionInfo)
@@ -87,6 +164,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new InvalidOperationException("A hostname is required for native RDP launch.");
             if (connectionInfo.Port is < 0 or > 65535)
                 throw new InvalidOperationException($"The RDP port '{connectionInfo.Port}' is outside the valid range.");
+            if (connectionInfo.UseRestrictedAdmin && connectionInfo.UseRCG)
+                throw new InvalidOperationException("Restricted Admin and Remote Credential Guard cannot be enabled at the same time.");
         }
     }
 }
