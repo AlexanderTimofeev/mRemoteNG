@@ -33,7 +33,9 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 AddInt(lines, "desktopheight", connectionInfo.ResolutionHeight);
             AddInt(lines, "use multimon", Bool(connectionInfo.RDPUseMultimon));
             AddInt(lines, "session bpp", ColorDepth(connectionInfo.Colors.ToString()));
-            AddInt(lines, "desktopscalefactor", Convert.ToInt32(connectionInfo.DesktopScaleFactor, CultureInfo.InvariantCulture));
+            int? desktopScaleFactor = DesktopScaleFactor(connectionInfo.DesktopScaleFactor);
+            if (desktopScaleFactor.HasValue)
+                AddInt(lines, "desktopscalefactor", desktopScaleFactor.Value);
 
             AddInt(lines, "bitmapcachepersistenable", Bool(connectionInfo.CacheBitmaps));
             AddInt(lines, "disable wallpaper", Bool(!connectionInfo.DisplayWallpaper));
@@ -156,6 +158,15 @@ namespace mRemoteNG.Connection.Protocol.RDP
             "Colors16Bit" => 16,
             "Colors24Bit" => 24,
             _ => 32
+        };
+
+        private static int? DesktopScaleFactor(RDPDesktopScaleFactor value) => value switch
+        {
+            RDPDesktopScaleFactor.Scale100 => 100,
+            RDPDesktopScaleFactor.Scale125 => 125,
+            RDPDesktopScaleFactor.Scale150 => 150,
+            RDPDesktopScaleFactor.Scale200 => 200,
+            _ => null
         };
 
         private static int AudioMode(string value) => value switch
