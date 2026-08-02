@@ -18,3 +18,14 @@
 
 ## Validation
 - Build and test results are provided by the repository PR_Validation workflow.
+
+## SQL/database persistence
+- Added `RdpClientMode` to the explicit `tblCons` DataTable schema.
+- Added dirty checking, serialization, and backward-compatible deserialization.
+- Missing columns/values keep the model default `Embedded`.
+- Expected-schema consumers found:
+- `mRemoteNG\Config\Serializers\ConnectionSerializers\Sql\SqlDatabaseMetaDataRetriever.cs` line 851: `DataTable expectedSchema = DataTableSerializer.GetExpectedSchema();`
+- `mRemoteNG\Config\Serializers\ConnectionSerializers\Sql\SqlDatabaseMetaDataRetriever.cs` line 878: `DataTable expectedSchema = DataTableSerializer.GetExpectedSchema();`
+- `mRemoteNGTests\Config\Serializers\DataTableSerializerTests.cs` line 145: `DataTable expectedSchema = DataTableSerializer.GetExpectedSchema();`
+- `mRemoteNGTests\Config\Serializers\DataTableSerializerTests.cs` line 155: `DataTable expectedSchema = DataTableSerializer.GetExpectedSchema();`
+- `mRemoteNGTests\Config\Serializers\ConnectionSerializers\Sql\NativeRdpDataTableSchemaTests.cs` line 12: `var schema = DataTableSerializer.GetExpectedSchema();`

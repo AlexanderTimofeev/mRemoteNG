@@ -231,6 +231,10 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
                 if (Enum.TryParse((string)dataRow["RdpVersion"], true, out RdpVersion rdpVersion))
                     connectionInfo.RdpVersion = rdpVersion;
 
+            if (dataRow.Table.Columns.Contains("RdpClientMode") && !dataRow.IsNull("RdpClientMode"))
+                if (Enum.TryParse((string)dataRow["RdpClientMode"], true, out RdpClientMode rdpClientMode))
+                    connectionInfo.RdpClientMode = rdpClientMode;
+
             //connectionInfo.Inheritance.ExternalCredentialProvider = MiscTools.GetBooleanValue(dataRow["InheritExternalCredentialProvider"]);
             //connectionInfo.Inheritance.RDGatewayExternalCredentialProvider = MiscTools.GetBooleanValue(dataRow["InheritRDGatewayExternalCredentialProvider"]);
             //connectionInfo.Inheritance.RDGatewayUserViaAPI = MiscTools.GetBooleanValue(dataRow["InheritRDGatewayUserViaAPI"]);

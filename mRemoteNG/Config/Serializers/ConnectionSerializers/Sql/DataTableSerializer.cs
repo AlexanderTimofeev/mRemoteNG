@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -293,6 +293,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataTable.Columns.Add("RDPAuthenticationLevel", typeof(string));
             dataTable.Columns.Add("RDPMinutesToIdleTimeout", typeof(int));
             dataTable.Columns.Add("RdpVersion", typeof(string));
+            dataTable.Columns.Add("RdpClientMode", typeof(string));
             dataTable.Columns.Add("RedirectAudioCapture", typeof(bool));
             dataTable.Columns.Add("RedirectWebAuthn", typeof(bool));
             dataTable.Columns.Add("EnableRdsAadAuth", typeof(bool));
@@ -457,6 +458,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             isFieldNotChange = isFieldNotChange && dataRow["RDPAuthenticationLevel"].Equals(connectionInfo.RDPAuthenticationLevel.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["RDPMinutesToIdleTimeout"].Equals(connectionInfo.RDPMinutesToIdleTimeout);
             isFieldNotChange = isFieldNotChange && dataRow["RdpVersion"].Equals(connectionInfo.RdpVersion.ToString());
+            isFieldNotChange = isFieldNotChange && dataRow["RdpClientMode"].Equals(connectionInfo.RdpClientMode.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["RedirectAudioCapture"].Equals(connectionInfo.RedirectAudioCapture);
             isFieldNotChange = isFieldNotChange && dataRow["RedirectWebAuthn"].Equals(connectionInfo.RedirectWebAuthn);
             isFieldNotChange = isFieldNotChange && dataRow["EnableRdsAadAuth"].Equals(connectionInfo.EnableRdsAadAuth);
@@ -752,6 +754,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataRow["RDPSignScope"] = connectionInfo.RDPSignScope;
             dataRow["RDPSignature"] = connectionInfo.RDPSignature;
             dataRow["RdpVersion"] = connectionInfo.RdpVersion;
+            dataRow["RdpClientMode"] = connectionInfo.RdpClientMode;
             dataRow["RedirectAudioCapture"] = connectionInfo.RedirectAudioCapture;
             dataRow["RedirectWebAuthn"] = connectionInfo.RedirectWebAuthn;
             dataRow["EnableRdsAadAuth"] = connectionInfo.EnableRdsAadAuth;
