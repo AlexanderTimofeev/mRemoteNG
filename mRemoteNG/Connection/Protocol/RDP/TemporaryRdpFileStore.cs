@@ -33,7 +33,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             });
         }
 
-        public void TryDelete(string? path)
+        public static void TryDelete(string? path)
         {
             if (string.IsNullOrWhiteSpace(path))
                 return;
