@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.Versioning;
 using System.Security;
 using System.Xml.Linq;
@@ -99,6 +99,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Xml
             element.Add(new XAttribute("AlternativeAddress", connectionInfo.AlternativeAddress ?? string.Empty));
             element.Add(new XAttribute("Protocol", connectionInfo.Protocol));
             element.Add(new XAttribute("RdpVersion", connectionInfo.RdpVersion.ToString().ToLowerInvariant()));
+            element.Add(new XAttribute("RdpClientMode", connectionInfo.RdpClientMode));
             element.Add(new XAttribute("SSHTunnelConnectionName", connectionInfo.SSHTunnelConnectionName ?? string.Empty));
             element.Add(new XAttribute("OpeningCommand", connectionInfo.OpeningCommand ?? string.Empty));
             element.Add(new XAttribute("SSHOptions", connectionInfo.SSHOptions ?? string.Empty));
