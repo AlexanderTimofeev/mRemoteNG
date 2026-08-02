@@ -31,10 +31,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             ResolveExternalProvider(
                 connectionInfo.ExternalCredentialProvider,
-                connectionInfo.UserViaAPI,
+                connectionInfo.UserViaAPI ?? string.Empty,
                 connectionInfo,
-                connectionInfo.Hostname,
-                connectionInfo.Username,
+                connectionInfo.Hostname ?? string.Empty,
+                connectionInfo.Username ?? string.Empty,
                 ref username,
                 ref password,
                 ref domain);
@@ -78,10 +78,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             ResolveExternalProvider(
                 connectionInfo.RDGatewayExternalCredentialProvider,
-                connectionInfo.RDGatewayUserViaAPI,
+                connectionInfo.RDGatewayUserViaAPI ?? string.Empty,
                 connectionInfo,
-                connectionInfo.RDGatewayHostname,
-                connectionInfo.RDGatewayUsername,
+                connectionInfo.RDGatewayHostname ?? string.Empty,
+                connectionInfo.RDGatewayUsername ?? string.Empty,
                 ref username,
                 ref password,
                 ref domain);
@@ -154,8 +154,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 provider,
                 apiReference,
                 connectionInfo,
-                connectionInfo.Hostname,
-                connectionInfo.Username,
+                connectionInfo.Hostname ?? string.Empty,
+                connectionInfo.Username ?? string.Empty,
                 ref username,
                 ref password,
                 ref domain);
@@ -199,7 +199,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         if (connectionInfo.VaultOpenbaoSecretEngine == VaultOpenbaoSecretEngine.Kv &&
                             string.IsNullOrEmpty(username))
                         {
-                            username = vaultFallbackUsername ?? string.Empty;
+                            username = vaultFallbackUsername;
                         }
 
                         ExternalConnectors.VO.VaultOpenbao.ReadPasswordRDP(
