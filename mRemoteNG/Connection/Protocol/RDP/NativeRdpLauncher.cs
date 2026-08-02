@@ -168,6 +168,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new InvalidOperationException("Restricted Admin and Remote Credential Guard cannot be enabled at the same time.");
             if (force.HasFlag(ConnectionInfo.Force.ViewOnly))
                 throw new NotSupportedException("View-only mode is not available in the native Windows RDP client. Use Embedded mode for this launch.");
+            if (connectionInfo.UseVmId || connectionInfo.UseEnhancedMode)
+                throw new NotSupportedException("Hyper-V VM ID and Enhanced Session connections require the embedded RDP control. Use Embedded mode for this connection.");
         }
     }
 }
