@@ -22,10 +22,11 @@ Each signing attempt records:
 - certificate-store locations inspected;
 - selected certificate subject, SHA-1 thumbprint, SHA-256 hash, validity dates and private-key availability;
 - `rdpsign.exe` path and file version;
-- the exact command line used for every signing attempt;
-- process ID, duration, exit code in hexadecimal and decimal forms;
-- complete stdout and stderr from `rdpsign.exe`;
-- whether the SHA-1 compatibility attempt was started and its result.
+- the exact direct command line;
+- the encoded Windows PowerShell retry script when the direct process fails;
+- process IDs, durations, and exit codes in hexadecimal and decimal forms;
+- complete stdout and stderr from both launch methods;
+- whether the PowerShell-hosted retry was started and its result.
 
 The log does not record destination or gateway passwords and does not record the contents of the generated RDP file.
 
@@ -47,10 +48,10 @@ After reproducing a signing failure, open the log:
 notepad "$env:LOCALAPPDATA\mRemoteNG\Logs\native-rdp-signing.log"
 ```
 
-Or print the final 150 lines:
+Or print the final 180 lines:
 
 ```powershell
-Get-Content "$env:LOCALAPPDATA\mRemoteNG\Logs\native-rdp-signing.log" -Tail 150
+Get-Content "$env:LOCALAPPDATA\mRemoteNG\Logs\native-rdp-signing.log" -Tail 180
 ```
 
 The most useful block starts with:
