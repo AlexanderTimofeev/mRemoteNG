@@ -25,6 +25,20 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Install Visual Studio 2026 Build Tools
+        shell: pwsh
+        run: |
+          choco install visualstudio2026buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended --quiet" -y --ignore-package-exit-codes=3010
+
+      - name: Generate T4 assembly info
+        shell: pwsh
+        run: |
+          dotnet tool install --global dotnet-t4
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          $ttFile = "$env:GITHUB_WORKSPACE\mRemoteNG\Properties\AssemblyInfo.tt"
+          $vsPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\PublicAssemblies"
+          t4 $ttFile -P platformType=x64 -r:"$vsPath\EnvDTE.dll" -r:"$vsPath\Microsoft.VisualStudio.Interop.dll"
+
       - name: Restore, build and test
         shell: pwsh
         run: |
@@ -40,7 +54,7 @@ jobs:
           $buildExit = -1
           $testExit = -1
           if ($restoreExit -eq 0) {
-            dotnet build mRemoteNG.sln --configuration Debug -p:Platform=x64 --no-restore 2>&1 | Tee-Object -FilePath $report -Append
+            msbuild mRemoteNG.sln -p:Configuration=Debug -p:Platform=x64 -p:RestorePackages=false /verbosity:minimal 2>&1 | Tee-Object -FilePath $report -Append
             $buildExit = $LASTEXITCODE
           }
           "BUILD_EXIT=$buildExit" | Add-Content $report
@@ -55,5 +69,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add $report
-          git commit -m "chore: record native RDP migration validation"
+          git commit -m "chore: update native RDP migration validation"
           git push origin HEAD:agent/native-mstsc-launch
