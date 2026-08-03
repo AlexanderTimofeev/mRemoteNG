@@ -48,8 +48,13 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 WriteCredentialIfAvailable(connectionInfo.Hostname, destinationCredentials);
                 WriteGatewayCredentialIfAvailable(connectionInfo, destinationCredentials, gatewayCredentials);
 
+                bool includeGatewayAccessToken = !force.HasFlag(ConnectionInfo.Force.NoCredentials);
                 rdpPath = _fileStore.Create(
-                    RdpFileSerializer.Serialize(connectionInfo, destinationCredentials, gatewayCredentials));
+                    RdpFileSerializer.Serialize(
+                        connectionInfo,
+                        destinationCredentials,
+                        gatewayCredentials,
+                        includeGatewayAccessToken));
 
                 ProcessStartInfo startInfo = new(executable)
                 {
