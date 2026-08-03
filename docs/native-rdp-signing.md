@@ -20,7 +20,7 @@ Do not use either of these values:
 $certificate.Thumbprint
 ```
 
-That is normally a 40-character SHA-1 thumbprint and is not accepted by current Windows 11 versions of `rdpsign.exe`.
+That is normally the 40-character SHA-1 thumbprint. mRemoteNG derives it automatically from the matching certificate only when a Windows `rdpsign.exe` compatibility fallback is required.
 
 ```powershell
 (Get-FileHash $cerPath -Algorithm SHA256).Hash
@@ -135,19 +135,29 @@ For every native launch, mRemoteNG:
 3. Requires exactly 64 hexadecimal characters.
 4. Finds the matching certificate in `CurrentUser\My` or `LocalMachine\My`.
 5. Checks that the certificate has a private key and is currently valid.
-6. Runs:
+6. Runs a hidden verbose signing command and captures all output:
 
    ```text
-   rdpsign.exe /sha256 <64-character-hash> /q <file.rdp>
+   rdpsign.exe /sha256 <64-character-hash> /v <file.rdp>
    ```
 
-7. Starts `mstsc.exe`.
+7. If that call fails with `0x80092004 (CRYPT_E_NOT_FOUND)`, retries with the matching certificate's 40-character SHA-1 thumbprint while keeping the `/sha256` option:
+
+   ```text
+   rdpsign.exe /sha256 <SHA-1-thumbprint> /v <file.rdp>
+   ```
+
+   Some Windows `rdpsign.exe` implementations use `/sha256` to select the signing mode but still locate the certificate by its SHA-1 store thumbprint.
+
+8. Starts `mstsc.exe`.
 
 When signing fails:
 
 - `mstsc` still starts with the unsigned file;
 - a warning is shown once per mRemoteNG application session;
-- every failure is logged with the full exception and `rdpsign.exe` output.
+- every failure is logged with both decimal and hexadecimal exit codes, the file path, certificate hashes, and full `rdpsign.exe` output.
+
+When the compatibility retry succeeds, mRemoteNG logs a warning explaining that the SHA-1 thumbprint fallback was used.
 
 ## Verify manually
 
@@ -190,7 +200,24 @@ Expected exit code:
 0
 ```
 
-## Replace an old 40-character value
+To test the compatibility form manually:
+
+```powershell
+$cert = Get-ChildItem Cert:\CurrentUser\My |
+    Where-Object FriendlyName -eq "mRemoteNG RDP Publisher" |
+    Where-Object HasPrivateKey |
+    Sort-Object NotAfter -Descending |
+    Select-Object -First 1
+
+& "$env:SystemRoot\System32\rdpsign.exe" `
+    /sha256 $cert.Thumbprint `
+    /v `
+    $rdp.FullName
+```
+
+## Replace an old 40-character configured value
+
+The configuration file must still contain the 64-character SHA-256 hash:
 
 ```powershell
 $cert = Get-ChildItem Cert:\CurrentUser\My |
