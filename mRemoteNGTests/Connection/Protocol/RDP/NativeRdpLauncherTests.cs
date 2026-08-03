@@ -81,13 +81,16 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
         }
 
         [Test]
-        public void CertificateLookupFailureRecognizesSignedProcessExitCode()
+        public void PowerShellSigningScriptEscapesSingleQuotesInPaths()
         {
-            int exitCode = unchecked((int)0x80092004);
+            string script = NativeRdpFileSigner.BuildPowerShellSigningScript(
+                "C:\\Windows\\System32\\rdpsign.exe",
+                new string('A', 64),
+                "C:\\Temp\\Admin's server.rdp");
 
-            Assert.That(exitCode, Is.EqualTo(-2146885628));
-            Assert.That(NativeRdpFileSigner.IsCertificateLookupFailure(exitCode), Is.True);
-            Assert.That(NativeRdpFileSigner.IsCertificateLookupFailure(1), Is.False);
+            Assert.That(script, Does.Contain("/sha256"));
+            Assert.That(script, Does.Contain("Admin''s server.rdp"));
+            Assert.That(script, Does.Contain("exit $LASTEXITCODE"));
         }
     }
 }
