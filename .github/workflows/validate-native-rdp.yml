@@ -20,6 +20,24 @@ jobs:
           ref: agent/native-mstsc-launch
           fetch-depth: 0
 
+      - name: Apply confirmed compiler fix
+        shell: pwsh
+        run: |
+          $path = "mRemoteNG/Connection/ConnectionInfo.cs"
+          $content = Get-Content $path -Raw
+          if (-not $content.Contains("using mRemoteNG.Tools;")) {
+            $content = $content.Replace(
+              "using mRemoteNG.Tree.Root;",
+              "using mRemoteNG.Tree.Root;`r`nusing mRemoteNG.Tools;`r`nusing mRemoteNG.Tools.Attributes;")
+            Set-Content $path $content -NoNewline
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $path
+          git commit -m "fix: import connection property-grid helpers"
+          git push origin HEAD:agent/native-mstsc-launch
+
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -67,8 +85,6 @@ jobs:
           "VALIDATION_COMPLETE=1" | Add-Content $report
 
           git checkout -- mRemoteNG/mRemoteNG.csproj
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add $report
           git commit -m "chore: update native RDP migration validation"
           git push origin HEAD:agent/native-mstsc-launch
