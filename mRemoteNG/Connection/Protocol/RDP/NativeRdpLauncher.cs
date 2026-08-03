@@ -36,7 +36,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 bool integratedSecurity = connectionInfo.UseRestrictedAdmin || connectionInfo.UseRCG;
                 bool suppressCredentialInjection =
                     force.HasFlag(ConnectionInfo.Force.NoCredentials) ||
-                    connectionInfo.AlwaysPromptForCredentials;
+                    RdpFileSerializer.GetOptionalBool(connectionInfo, "AlwaysPromptForCredentials");
                 bool prompt = !integratedSecurity && suppressCredentialInjection;
                 bool gatewayUsesConnectionCredentials =
                     HasConfiguredGateway(connectionInfo) &&
@@ -159,8 +159,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
             bool sameTarget = string.Equals(destinationTarget, gatewayTarget, StringComparison.OrdinalIgnoreCase);
             bool sameCredentials = gatewayCredentials.Equals(writtenDestinationCredentials);
 
-            // Credential Manager can hold only one generic credential for a target. Preserve a
-            // different destination credential only when one was actually written for this launch.
             if (sameTarget && writtenDestinationCredentials.HasPassword && !sameCredentials)
                 return;
 
@@ -176,7 +174,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             string normalizedDomain = domain ?? string.Empty;
             if (string.IsNullOrEmpty(normalizedDomain))
             {
-                (normalizedUsername, normalizedDomain) = RdpProtocol.ParseDomainFromUsername(normalizedUsername);
+                (normalizedUsername, normalizedDomain) = RdpFileSerializer.ParseDomainFromUsername(normalizedUsername);
             }
 
             return new RdpResolvedCredentials(normalizedUsername, string.Empty, normalizedDomain);
