@@ -129,7 +129,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             if (height > 0)
                 AddInt(lines, "desktopheight", height);
 
-            int? desktopScaleFactor = DesktopScaleFactor(connectionInfo.DesktopScaleFactor);
+            int? desktopScaleFactor = DesktopScaleFactor(connectionInfo.DesktopScaleFactor.ToString());
             if (desktopScaleFactor.HasValue)
                 AddInt(lines, "desktopscalefactor", desktopScaleFactor.Value);
         }
@@ -255,12 +255,12 @@ namespace mRemoteNG.Connection.Protocol.RDP
             _ => 32
         };
 
-        private static int? DesktopScaleFactor(RDPDesktopScaleFactor value) => value switch
+        private static int? DesktopScaleFactor(string value) => value switch
         {
-            RDPDesktopScaleFactor.Scale100 => 100,
-            RDPDesktopScaleFactor.Scale125 => 125,
-            RDPDesktopScaleFactor.Scale150 => 150,
-            RDPDesktopScaleFactor.Scale200 => 200,
+            "Scale100" => 100,
+            "Scale125" => 125,
+            "Scale150" => 150,
+            "Scale200" => 200,
             _ => null
         };
 
