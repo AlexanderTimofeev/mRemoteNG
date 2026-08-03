@@ -71,5 +71,23 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
 
             Assert.That(arguments, Does.Contain("/prompt"));
         }
+
+        [Test]
+        public void SigningHashNormalizationRemovesSeparatorsAndUppercasesHex()
+        {
+            string normalized = NativeRdpFileSigner.NormalizeHash("75 20-e6:c9");
+
+            Assert.That(normalized, Is.EqualTo("7520E6C9"));
+        }
+
+        [Test]
+        public void CertificateLookupFailureRecognizesSignedProcessExitCode()
+        {
+            int exitCode = unchecked((int)0x80092004);
+
+            Assert.That(exitCode, Is.EqualTo(-2146885628));
+            Assert.That(NativeRdpFileSigner.IsCertificateLookupFailure(exitCode), Is.True);
+            Assert.That(NativeRdpFileSigner.IsCertificateLookupFailure(1), Is.False);
+        }
     }
 }
