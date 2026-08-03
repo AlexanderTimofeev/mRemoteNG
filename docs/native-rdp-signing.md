@@ -20,7 +20,7 @@ Do not use either of these values:
 $certificate.Thumbprint
 ```
 
-That is normally the 40-character SHA-1 thumbprint. mRemoteNG derives it automatically from the matching certificate only when a Windows `rdpsign.exe` compatibility fallback is required.
+That is normally the 40-character SHA-1 thumbprint. It is retained only in diagnostics and is not used as the `/sha256` signing value.
 
 ```powershell
 (Get-FileHash $cerPath -Algorithm SHA256).Hash
@@ -44,7 +44,7 @@ The SHA-256 certificate hash can be supplied through either source:
    %LOCALAPPDATA%\mRemoteNG\native-rdp-signing-thumbprint.txt
    ```
 
-The environment variable has priority. Spaces and other non-hexadecimal characters are removed automatically, and hexadecimal letters are normalized to uppercase.
+The process environment variable has priority over the text file. Spaces and other non-hexadecimal characters are removed automatically, and hexadecimal letters are normalized to uppercase.
 
 The final normalized value must contain exactly 64 hexadecimal characters.
 
@@ -135,29 +135,22 @@ For every native launch, mRemoteNG:
 3. Requires exactly 64 hexadecimal characters.
 4. Finds the matching certificate in `CurrentUser\My` or `LocalMachine\My`.
 5. Checks that the certificate has a private key and is currently valid.
-6. Runs a hidden verbose signing command and captures all output:
+6. First runs `rdpsign.exe` directly from the .NET process:
 
    ```text
    rdpsign.exe /sha256 <64-character-hash> /v <file.rdp>
    ```
 
-7. If that call fails with `0x80092004 (CRYPT_E_NOT_FOUND)`, retries with the matching certificate's 40-character SHA-1 thumbprint while keeping the `/sha256` option:
-
-   ```text
-   rdpsign.exe /sha256 <SHA-1-thumbprint> /v <file.rdp>
-   ```
-
-   Some Windows `rdpsign.exe` implementations use `/sha256` to select the signing mode but still locate the certificate by its SHA-1 store thumbprint.
-
+7. If the direct process returns a non-zero exit code, retries the same command through hidden Windows PowerShell using an encoded command. This matches the interactive PowerShell invocation used during manual verification while avoiding shell interpolation of the certificate hash or RDP path.
 8. Starts `mstsc.exe`.
 
 When signing fails:
 
 - `mstsc` still starts with the unsigned file;
 - a warning is shown once per mRemoteNG application session;
-- every failure is logged with both decimal and hexadecimal exit codes, the file path, certificate hashes, and full `rdpsign.exe` output.
+- every failure is logged with both decimal and hexadecimal exit codes, the file path, certificate hashes, the generated PowerShell command, and complete process output.
 
-When the compatibility retry succeeds, mRemoteNG logs a warning explaining that the SHA-1 thumbprint fallback was used.
+When the PowerShell-hosted retry succeeds, mRemoteNG logs a warning explaining that the compatibility launch path was used.
 
 ## Verify manually
 
@@ -200,24 +193,9 @@ Expected exit code:
 0
 ```
 
-To test the compatibility form manually:
-
-```powershell
-$cert = Get-ChildItem Cert:\CurrentUser\My |
-    Where-Object FriendlyName -eq "mRemoteNG RDP Publisher" |
-    Where-Object HasPrivateKey |
-    Sort-Object NotAfter -Descending |
-    Select-Object -First 1
-
-& "$env:SystemRoot\System32\rdpsign.exe" `
-    /sha256 $cert.Thumbprint `
-    /v `
-    $rdp.FullName
-```
-
 ## Replace an old 40-character configured value
 
-The configuration file must still contain the 64-character SHA-256 hash:
+The configuration file must contain the 64-character SHA-256 hash:
 
 ```powershell
 $cert = Get-ChildItem Cert:\CurrentUser\My |
