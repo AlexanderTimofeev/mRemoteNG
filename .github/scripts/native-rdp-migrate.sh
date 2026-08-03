@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if grep -q 'public virtual RdpClientMode RdpClientMode' mRemoteNG/Connection/AbstractConnectionRecord.cs; then
+  echo 'Integration patch already applied.'
+  exit 0
+fi
+
+git remote add migration-source https://github.com/AlexanderTimofeev/mRemoteNG-robertpopa22.git
+git fetch migration-source main agent/native-mstsc-launch
+
+clean_paths=(
+  mRemoteNG/Config/Serializers/ConnectionSerializers/Sql/DataTableDeserializer.cs
+  mRemoteNG/Config/Serializers/ConnectionSerializers/Sql/DataTableSerializer.cs
+  mRemoteNG/Schemas/mremoteng_confcons_v2_8.xsd
+)
+git diff --binary migration-source/main migration-source/agent/native-mstsc-launch -- "${clean_paths[@]}" > /tmp/native-rdp-clean.patch
+git apply --3way --index /tmp/native-rdp-clean.patch
+
+git show migration-source/agent/native-mstsc-launch:mRemoteNG/Connection/Protocol/RDP/RdpCredentialCacheCleaner.cs > mRemoteNG/Connection/Protocol/RDP/RdpCredentialCacheCleaner.cs
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    text = p.read_text(encoding='utf-8-sig')
+    if new in text:
+        return
+    if old not in text:
+        raise SystemExit(f'Pattern not found in {path}: {old!r}')
+    p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+replace_once(
+    'mRemoteNG/Config/Serializers/ConnectionSerializers/Xml/XmlConnectionNodeSerializer28.cs',
+    '            element.Add(new XAttribute("RdpVersion", connectionInfo.RdpVersion.ToString().ToLowerInvariant()));\n',
+    '            element.Add(new XAttribute("RdpVersion", connectionInfo.RdpVersion.ToString().ToLowerInvariant()));\n'
+    '            element.Add(new XAttribute("RdpClientMode", connectionInfo.RdpClientMode));\n')
+
+replace_once(
+    'mRemoteNG/Config/Serializers/ConnectionSerializers/Xml/XmlConnectionsDeserializer.cs',
+    '            ConnectionInfo connectionInfo = new(connectionId);\n',
+    '            ConnectionInfo connectionInfo = new(connectionId);\n'
+    '            connectionInfo.RdpClientMode = xmlnode.GetAttributeAsEnum<RdpClientMode>("RdpClientMode");\n')
+
+replace_once(
+    'mRemoteNG/Connection/AbstractConnectionRecord.cs',
+    '        private RdpVersion _rdpProtocolVersion;\n',
+    '        private RdpVersion _rdpProtocolVersion;\n'
+    '        private RdpClientMode _rdpClientMode;\n')
+
+p = Path('mRemoteNG/Connection/AbstractConnectionRecord.cs')
+text = p.read_text(encoding='utf-8-sig')
+if 'public virtual RdpClientMode RdpClientMode' not in text:
+    pattern = re.compile(r'(        public virtual RdpVersion RdpVersion\s*\{.*?^        \}\r?\n)', re.MULTILINE | re.DOTALL)
+    match = pattern.search(text)
+    if not match:
+        raise SystemExit('RdpVersion property block not found')
+    block = '''
+        [LocalizedAttributes.LocalizedCategory(nameof(Language.Protocol), 3),
+         DisplayName("RDP Client"),
+         Description("Choose whether RDP opens inside mRemoteNG or in the native Windows mstsc.exe client."),
+         TypeConverter(typeof(MiscTools.EnumTypeConverter)),
+         AttributeUsedInProtocol(ProtocolType.RDP)]
+        public virtual RdpClientMode RdpClientMode
+        {
+            get => _rdpClientMode;
+            set => SetField(ref _rdpClientMode, value, nameof(RdpClientMode));
+        }
+'''
+    text = text[:match.end()] + block + text[match.end():]
+    p.write_text(text, encoding='utf-8')
+
+replace_once(
+    'mRemoteNG/Connection/ConnectionInitiator.cs',
+    'using mRemoteNG.Connection.Protocol;\n',
+    'using mRemoteNG.Connection.Protocol;\nusing mRemoteNG.Connection.Protocol.RDP;\n')
+
+replace_once(
+    'mRemoteNG/Connection/ConnectionInitiator.cs',
+    '                StartPreConnectionExternalApp(connectionInfo);\n',
+    '''                StartPreConnectionExternalApp(connectionInfo);
+
+                if (connectionInfo.Protocol == ProtocolType.RDP &&
+                    connectionInfo.RdpClientMode == RdpClientMode.NativeMstsc)
+                {
+                    if (!string.IsNullOrEmpty(connectionInfoOriginal.SSHTunnelConnectionName))
+                    {
+                        Runtime.MessageCollector.AddMessage(
+                            MessageClass.WarningMsg,
+                            "Native mstsc launch is not available for RDP connections using an mRemoteNG-managed SSH tunnel. Use Embedded mode for this connection.");
+                        return;
+                    }
+
+                    NativeRdpLauncher launcher = new();
+                    launcher.Launch(connectionInfo, force);
+                    return;
+                }
+''')
+
+replace_once(
+    'mRemoteNG/UI/Controls/ConnectionContextMenu.cs',
+    '            ClearCachedCredentialsResult outcome = RdpCredentialCacheCleaner.ClearCachedCredentials(hostname);\n',
+    '            ClearCachedCredentialsResult outcome = RdpCredentialCacheCleaner.ClearCachedCredentials(selected);\n')
+PY
+
+git add \
+  mRemoteNG/Config/Serializers/ConnectionSerializers/Sql/DataTableDeserializer.cs \
+  mRemoteNG/Config/Serializers/ConnectionSerializers/Sql/DataTableSerializer.cs \
+  mRemoteNG/Config/Serializers/ConnectionSerializers/Xml/XmlConnectionNodeSerializer28.cs \
+  mRemoteNG/Config/Serializers/ConnectionSerializers/Xml/XmlConnectionsDeserializer.cs \
+  mRemoteNG/Connection/AbstractConnectionRecord.cs \
+  mRemoteNG/Connection/ConnectionInitiator.cs \
+  mRemoteNG/Connection/Protocol/RDP/RdpCredentialCacheCleaner.cs \
+  mRemoteNG/Schemas/mremoteng_confcons_v2_8.xsd \
+  mRemoteNG/UI/Controls/ConnectionContextMenu.cs
+
+git config user.name 'github-actions[bot]'
+git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+git commit -m 'feat: integrate native mstsc mode with current upstream'
+git push origin HEAD:agent/native-mstsc-launch-runner
