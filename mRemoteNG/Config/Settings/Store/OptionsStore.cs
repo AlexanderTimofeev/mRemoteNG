@@ -11,7 +11,7 @@ namespace mRemoteNG.Config.Settings.Store
     /// SQLite-backed options store for development-only option management.
     /// Provides asynchronous CRUD operations for options that can be added/edited/deleted at runtime.
     /// </summary>
-    public class OptionsStore : IOptionsStore
+    public class OptionsStore : IDisposable
     {
         private readonly string _dbPath;
         private readonly string _connectionString;
