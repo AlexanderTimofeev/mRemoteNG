@@ -46,7 +46,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 domain = parsedDomain;
             }
 
-            ApplyEmptyCredentialDefaults(connectionInfo, ref username, ref password, ref domain);
+            ApplyCredentialDefaults(connectionInfo, ref username, ref password, ref domain);
             return new RdpResolvedCredentials(username, password, domain);
         }
 
@@ -96,46 +96,53 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return new RdpResolvedCredentials(username, password, domain);
         }
 
-        private static void ApplyEmptyCredentialDefaults(
+        private static void ApplyCredentialDefaults(
             ConnectionInfo connectionInfo,
             ref string username,
             ref string password,
             ref string domain)
         {
-            if (!string.IsNullOrEmpty(username))
-                return;
+            string emptyCredentialsMode = OptionsCredentialsPage.Default.EmptyCredentials;
 
-            switch (OptionsCredentialsPage.Default.EmptyCredentials)
+            if (string.IsNullOrEmpty(username))
             {
-                case "windows":
-                    username = Environment.UserName;
-                    if (string.IsNullOrEmpty(domain))
-                        domain = Environment.UserDomainName;
-                    return;
-                case "custom":
-                    username = OptionsCredentialsPage.Default.DefaultUsername ?? string.Empty;
-                    if (string.IsNullOrEmpty(username))
-                    {
-                        ResolveDefaultExternalProvider(
-                            connectionInfo,
-                            ref username,
-                            ref password,
-                            ref domain);
-                    }
+                switch (emptyCredentialsMode)
+                {
+                    case "windows":
+                        username = Environment.UserName;
+                        break;
+                    case "custom":
+                        username = OptionsCredentialsPage.Default.DefaultUsername ?? string.Empty;
+                        if (string.IsNullOrEmpty(username))
+                        {
+                            ResolveDefaultExternalProvider(
+                                connectionInfo,
+                                ref username,
+                                ref password,
+                                ref domain);
+                        }
+                        break;
+                }
+            }
 
-                    if (string.IsNullOrEmpty(domain))
-                        domain = OptionsCredentialsPage.Default.DefaultDomain ?? string.Empty;
+            if (string.IsNullOrEmpty(domain))
+            {
+                domain = emptyCredentialsMode switch
+                {
+                    "windows" => Environment.UserDomainName,
+                    "custom" => OptionsCredentialsPage.Default.DefaultDomain ?? string.Empty,
+                    _ => domain
+                };
+            }
 
-                    if (string.IsNullOrEmpty(password) &&
-                        !string.IsNullOrEmpty(OptionsCredentialsPage.Default.DefaultPassword))
-                    {
-                        LegacyRijndaelCryptographyProvider cryptographyProvider = new();
-                        password = cryptographyProvider.Decrypt(
-                            OptionsCredentialsPage.Default.DefaultPassword,
-                            Runtime.EncryptionKey);
-                    }
-
-                    return;
+            if (string.IsNullOrEmpty(password) &&
+                string.Equals(emptyCredentialsMode, "custom", StringComparison.Ordinal) &&
+                !string.IsNullOrEmpty(OptionsCredentialsPage.Default.DefaultPassword))
+            {
+                LegacyRijndaelCryptographyProvider cryptographyProvider = new();
+                password = cryptographyProvider.Decrypt(
+                    OptionsCredentialsPage.Default.DefaultPassword,
+                    Runtime.EncryptionKey);
             }
         }
 
