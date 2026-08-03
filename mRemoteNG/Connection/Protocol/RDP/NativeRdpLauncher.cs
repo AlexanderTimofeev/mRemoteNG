@@ -71,7 +71,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         connectionInfo,
                         destinationCredentials,
                         gatewayCredentials,
-                        includeGatewayAccessToken));
+                        includeGatewayAccessToken),
+                    connectionInfo.Name);
 
                 ProcessStartInfo startInfo = new(executable)
                 {
