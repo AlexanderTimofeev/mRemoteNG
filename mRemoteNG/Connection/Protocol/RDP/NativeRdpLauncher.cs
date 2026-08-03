@@ -178,13 +178,13 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private static bool TrySignRdpFileIfConfigured(string rdpPath)
         {
-            string thumbprint = ResolveSigningThumbprint();
-            if (string.IsNullOrEmpty(thumbprint))
+            string certificateSha256Hash = ResolveSigningThumbprint();
+            if (string.IsNullOrEmpty(certificateSha256Hash))
                 return false;
 
             try
             {
-                SignRdpFile(rdpPath, thumbprint);
+                SignRdpFile(rdpPath, certificateSha256Hash);
                 return true;
             }
             catch (Exception ex)
@@ -199,11 +199,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
             const string logMessage =
                 "Unable to sign the temporary RDP file. mstsc will continue with an unsigned file.";
 
-            // Keep full diagnostic details for every failed signing attempt.
             Runtime.MessageCollector.AddExceptionStackTrace(logMessage, exception);
 
-            // A persistent certificate problem would otherwise show the same modal warning for every connection.
-            // Notify the user once per application session, while continuing to log every failure.
             if (Interlocked.Exchange(ref _signingFailureNotificationShown, 1) != 0)
                 return;
 
@@ -233,17 +230,16 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 : message[..maxLength].TrimEnd() + "...";
         }
 
-        private static void SignRdpFile(string rdpPath, string thumbprint)
+        private static void SignRdpFile(string rdpPath, string certificateSha256Hash)
         {
-            string hashArgument = thumbprint.Length switch
+            if (certificateSha256Hash.Length != 64)
             {
-                40 => "/sha1",
-                64 => "/sha256",
-                _ => throw new InvalidOperationException(
-                    $"The configured RDP signing certificate thumbprint has {thumbprint.Length} hexadecimal characters; expected 40 for SHA-1 or 64 for SHA-256.")
-            };
+                throw new InvalidOperationException(
+                    $"The configured RDP signing certificate SHA-256 hash has {certificateSha256Hash.Length} hexadecimal characters; expected 64. " +
+                    "Use certificate.GetCertHashString(HashAlgorithmName.SHA256), not certificate.Thumbprint.");
+            }
 
-            ValidateSigningCertificate(thumbprint);
+            ValidateSigningCertificate(certificateSha256Hash);
 
             string signerExecutable = Path.Combine(Environment.SystemDirectory, "rdpsign.exe");
             if (!File.Exists(signerExecutable))
@@ -260,8 +256,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 StandardErrorEncoding = outputEncoding,
                 WorkingDirectory = Environment.SystemDirectory
             };
-            signStartInfo.ArgumentList.Add(hashArgument);
-            signStartInfo.ArgumentList.Add(thumbprint);
+            signStartInfo.ArgumentList.Add("/sha256");
+            signStartInfo.ArgumentList.Add(certificateSha256Hash);
             signStartInfo.ArgumentList.Add("/q");
             signStartInfo.ArgumentList.Add(rdpPath);
 
@@ -278,7 +274,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 }
                 catch
                 {
-                    // Best effort. The process will terminate with the application if necessary.
                 }
 
                 throw new TimeoutException("Signing the temporary RDP file timed out after 30 seconds.");
@@ -298,7 +293,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
         }
 
-        private static void ValidateSigningCertificate(string thumbprint)
+        private static void ValidateSigningCertificate(string certificateSha256Hash)
         {
             bool certificateFound = false;
             bool certificateWithPrivateKeyFound = false;
@@ -318,12 +313,16 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
                 foreach (X509Certificate2 certificate in store.Certificates)
                 {
-                    string certificateThumbprint = thumbprint.Length == 64
-                        ? NormalizeThumbprint(certificate.GetCertHashString(HashAlgorithmName.SHA256))
-                        : NormalizeThumbprint(certificate.Thumbprint);
+                    string storedCertificateSha256Hash = NormalizeThumbprint(
+                        certificate.GetCertHashString(HashAlgorithmName.SHA256));
 
-                    if (!string.Equals(certificateThumbprint, thumbprint, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(
+                            storedCertificateSha256Hash,
+                            certificateSha256Hash,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
                         continue;
+                    }
 
                     certificateFound = true;
                     if (!certificate.HasPrivateKey)
@@ -345,7 +344,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             if (!certificateFound)
             {
                 throw new InvalidOperationException(
-                    "No certificate matching the configured RDP signing thumbprint was found in CurrentUser\\My or LocalMachine\\My. " +
+                    "No certificate matching the configured RDP signing SHA-256 hash was found in CurrentUser\\My or LocalMachine\\My. " +
                     "Verify native-rdp-signing-thumbprint.txt and the certificate installation.");
             }
 
