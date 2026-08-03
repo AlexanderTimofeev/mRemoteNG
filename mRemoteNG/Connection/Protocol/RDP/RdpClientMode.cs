@@ -7,7 +7,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
         [Description("Embedded mRemoteNG tab")]
         Embedded = 0,
 
-        [Description("mstsc (Native Windows Remote Desktop client)")]
+        [Description("mstsc")]
         NativeMstsc = 1
     }
 }
