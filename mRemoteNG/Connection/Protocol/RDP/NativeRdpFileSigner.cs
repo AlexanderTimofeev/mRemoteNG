@@ -1,10 +1,11 @@
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text;
@@ -21,10 +22,63 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private const string SigningHashFileName = "native-rdp-signing-thumbprint.txt";
         private const string DiagnosticsLogFileName = "native-rdp-signing.log";
         private const long MaximumDiagnosticsLogSize = 2 * 1024 * 1024;
+        private const string Sha256Oid = "2.16.840.1.101.3.4.2.1";
 
-        private static readonly TimeSpan SigningTimeout = TimeSpan.FromSeconds(30);
         private static readonly object DiagnosticsLogLock = new();
         private static int _signingFailureNotificationShown;
+
+        // RDP settings covered by the publisher signature. The display names must match
+        // the names expected by mstsc in the signscope line.
+        private static readonly IReadOnlyList<(string Prefix, string ScopeName)> SecureSettings =
+        [
+            ("full address:s:", "Full Address"),
+            ("alternate full address:s:", "Alternate Full Address"),
+            ("pcb:s:", "PCB"),
+            ("use redirection server name:i:", "Use Redirection Server Name"),
+            ("server port:i:", "Server Port"),
+            ("negotiate security layer:i:", "Negotiate Security Layer"),
+            ("enablecredsspsupport:i:", "EnableCredSspSupport"),
+            ("disableconnectionsharing:i:", "DisableConnectionSharing"),
+            ("autoreconnection enabled:i:", "AutoReconnection Enabled"),
+            ("gatewayhostname:s:", "GatewayHostname"),
+            ("gatewayusagemethod:i:", "GatewayUsageMethod"),
+            ("gatewayprofileusagemethod:i:", "GatewayProfileUsageMethod"),
+            ("gatewaycredentialssource:i:", "GatewayCredentialsSource"),
+            ("support url:s:", "Support URL"),
+            ("promptcredentialonce:i:", "PromptCredentialOnce"),
+            ("require pre-authentication:i:", "Require pre-authentication"),
+            ("pre-authentication server address:s:", "Pre-authentication server address"),
+            ("alternate shell:s:", "Alternate Shell"),
+            ("shell working directory:s:", "Shell Working Directory"),
+            ("remoteapplicationprogram:s:", "RemoteApplicationProgram"),
+            ("remoteapplicationexpandworkingdir:s:", "RemoteApplicationExpandWorkingdir"),
+            ("remoteapplicationmode:i:", "RemoteApplicationMode"),
+            ("remoteapplicationguid:s:", "RemoteApplicationGuid"),
+            ("remoteapplicationname:s:", "RemoteApplicationName"),
+            ("remoteapplicationicon:s:", "RemoteApplicationIcon"),
+            ("remoteapplicationfile:s:", "RemoteApplicationFile"),
+            ("remoteapplicationfileextensions:s:", "RemoteApplicationFileExtensions"),
+            ("remoteapplicationcmdline:s:", "RemoteApplicationCmdLine"),
+            ("remoteapplicationexpandcmdline:s:", "RemoteApplicationExpandCmdLine"),
+            ("prompt for credentials:i:", "Prompt For Credentials"),
+            ("authentication level:i:", "Authentication Level"),
+            ("audiomode:i:", "AudioMode"),
+            ("redirectdrives:i:", "RedirectDrives"),
+            ("redirectprinters:i:", "RedirectPrinters"),
+            ("redirectcomports:i:", "RedirectCOMPorts"),
+            ("redirectsmartcards:i:", "RedirectSmartCards"),
+            ("redirectposdevices:i:", "RedirectPOSDevices"),
+            ("redirectclipboard:i:", "RedirectClipboard"),
+            ("devicestoredirect:s:", "DevicesToRedirect"),
+            ("drivestoredirect:s:", "DrivesToRedirect"),
+            ("loadbalanceinfo:s:", "LoadBalanceInfo"),
+            ("redirectdirectx:i:", "RedirectDirectX"),
+            ("rdgiskdcproxy:i:", "RDGIsKDCProxy"),
+            ("kdcproxyname:s:", "KDCProxyName"),
+            ("eventloguploadaddress:s:", "EventLogUploadAddress"),
+            ("enablerdsaadauth:i:", "EnableRdsAadAuth"),
+            ("redirectwebauthn:i:", "RedirectWebAuthn")
+        ];
 
         internal static bool TrySignIfConfigured(string rdpPath)
         {
@@ -33,7 +87,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 return false;
 
             string operationId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture)[..8];
-            WriteDiagnostic(operationId, "BEGIN native RDP signing attempt");
+            WriteDiagnostic(operationId, "BEGIN native RDP managed signing attempt");
             WriteDiagnostic(operationId, DescribeEnvironment());
             WriteDiagnostic(operationId, configuration.Describe());
             WriteDiagnostic(operationId, DescribeRdpFile(rdpPath));
@@ -41,14 +95,15 @@ namespace mRemoteNG.Connection.Protocol.RDP
             try
             {
                 SignRdpFile(operationId, rdpPath, configuration.EffectiveHash);
-                WriteDiagnostic(operationId, "SUCCESS: temporary RDP file was signed.");
-                WriteDiagnostic(operationId, "END native RDP signing attempt");
+                WriteDiagnostic(operationId, DescribeRdpFile(rdpPath));
+                WriteDiagnostic(operationId, "SUCCESS: temporary RDP file was signed in-process.");
+                WriteDiagnostic(operationId, "END native RDP managed signing attempt");
                 return true;
             }
             catch (Exception exception)
             {
                 WriteDiagnostic(operationId, "FAILURE: " + exception);
-                WriteDiagnostic(operationId, "END native RDP signing attempt");
+                WriteDiagnostic(operationId, "END native RDP managed signing attempt");
                 ReportSigningFailure(exception, operationId);
                 return false;
             }
@@ -76,24 +131,237 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 .ToArray());
         }
 
-        internal static string BuildPowerShellSigningScript(
-            string signerExecutable,
-            string certificateSha256Hash,
-            string rdpPath)
+        internal static string SignContent(string content, X509Certificate2 certificate)
         {
-            string signerLiteral = EscapePowerShellSingleQuotedLiteral(signerExecutable);
-            string hashLiteral = EscapePowerShellSingleQuotedLiteral(certificateSha256Hash);
-            string pathLiteral = EscapePowerShellSingleQuotedLiteral(rdpPath);
+            ArgumentNullException.ThrowIfNull(content);
+            ArgumentNullException.ThrowIfNull(certificate);
+            if (!certificate.HasPrivateKey)
+                throw new InvalidOperationException("The RDP signing certificate has no private key.");
 
-            return string.Join(
-                Environment.NewLine,
-                "$ErrorActionPreference = 'Continue'",
-                $"& '{signerLiteral}' /sha256 '{hashLiteral}' /v '{pathLiteral}'",
-                "exit $LASTEXITCODE");
+            List<string> settings = ParseSettings(content);
+            RemoveExistingSignature(settings);
+            EnsureAlternateFullAddress(settings);
+
+            List<string> signedLines = [];
+            List<string> scopeNames = [];
+            foreach ((string prefix, string scopeName) in SecureSettings)
+            {
+                foreach (string setting in settings)
+                {
+                    if (!setting.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    signedLines.Add(setting);
+                    scopeNames.Add(scopeName);
+                }
+            }
+
+            if (signedLines.Count == 0)
+                throw new InvalidOperationException("The generated RDP file contains no settings eligible for signing.");
+
+            string signScopeLine = "signscope:s:" + string.Join(',', scopeNames);
+            string signedMessage =
+                string.Join("\r\n", signedLines) + "\r\n" + signScopeLine + "\r\n\0";
+
+            ContentInfo contentInfo = new(Encoding.Unicode.GetBytes(signedMessage));
+            SignedCms cms = new(contentInfo, detached: true);
+            CmsSigner signer = new(SubjectIdentifierType.IssuerAndSerialNumber, certificate)
+            {
+                IncludeOption = X509IncludeOption.WholeChain,
+                DigestAlgorithm = new Oid(Sha256Oid)
+            };
+            cms.ComputeSignature(signer, silent: true);
+
+            byte[] pkcs7 = cms.Encode();
+            byte[] signatureBlob = BuildRdpSignatureBlob(pkcs7);
+            string signatureValue = FormatBase64(Convert.ToBase64String(signatureBlob));
+
+            return string.Join("\r\n", settings) + "\r\n" +
+                   signScopeLine + "\r\n" +
+                   "signature:s:" + signatureValue + "\r\n";
         }
 
-        internal static string EscapePowerShellSingleQuotedLiteral(string value) =>
-            (value ?? string.Empty).Replace("'", "''", StringComparison.Ordinal);
+        private static void SignRdpFile(
+            string operationId,
+            string rdpPath,
+            string certificateSha256Hash)
+        {
+            if (certificateSha256Hash.Length != 64)
+            {
+                throw new InvalidOperationException(
+                    $"The configured RDP signing certificate SHA-256 hash has {certificateSha256Hash.Length} hexadecimal characters; expected 64. " +
+                    "Use certificate.GetCertHashString(HashAlgorithmName.SHA256), not certificate.Thumbprint.");
+            }
+
+            using X509Certificate2 certificate = FindSigningCertificate(operationId, certificateSha256Hash);
+            WriteDiagnostic(operationId, DescribeCertificate(certificate));
+
+            string originalContent = File.ReadAllText(rdpPath, Encoding.Unicode);
+            string signedContent = SignContent(originalContent, certificate);
+
+            string temporaryPath = rdpPath + ".signed.tmp";
+            try
+            {
+                File.WriteAllText(temporaryPath, signedContent, Encoding.Unicode);
+                File.Move(temporaryPath, rdpPath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+
+            WriteDiagnostic(
+                operationId,
+                $"Managed CMS signature created. Signed settings={CountScopeEntries(signedContent)}, output length={new FileInfo(rdpPath).Length} bytes.");
+        }
+
+        private static X509Certificate2 FindSigningCertificate(
+            string operationId,
+            string certificateSha256Hash)
+        {
+            bool certificateFound = false;
+            bool certificateWithPrivateKeyFound = false;
+            bool certificateIsCurrentlyValid = false;
+
+            foreach (StoreLocation storeLocation in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+            {
+                using X509Store store = new(StoreName.My, storeLocation);
+                try
+                {
+                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                    WriteDiagnostic(
+                        operationId,
+                        $"Opened certificate store {storeLocation}\\My; certificate count={store.Certificates.Count}.");
+                }
+                catch (Exception exception)
+                {
+                    WriteDiagnostic(
+                        operationId,
+                        $"Unable to open certificate store {storeLocation}\\My: {exception}");
+                    continue;
+                }
+
+                foreach (X509Certificate2 candidate in store.Certificates)
+                {
+                    string candidateSha256Hash = NormalizeHash(
+                        candidate.GetCertHashString(HashAlgorithmName.SHA256));
+                    if (!string.Equals(
+                            candidateSha256Hash,
+                            certificateSha256Hash,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    certificateFound = true;
+                    WriteDiagnostic(
+                        operationId,
+                        $"Matched certificate in {storeLocation}\\My: Subject='{candidate.Subject}', " +
+                        $"SHA1={NormalizeHash(candidate.Thumbprint)}, SHA256={candidateSha256Hash}, " +
+                        $"HasPrivateKey={candidate.HasPrivateKey}, NotBefore={candidate.NotBefore:O}, NotAfter={candidate.NotAfter:O}.");
+
+                    if (!candidate.HasPrivateKey)
+                        continue;
+
+                    certificateWithPrivateKeyFound = true;
+                    DateTime now = DateTime.Now;
+                    if (now < candidate.NotBefore || now > candidate.NotAfter)
+                        continue;
+
+                    certificateIsCurrentlyValid = true;
+                    return new X509Certificate2(candidate);
+                }
+            }
+
+            if (!certificateFound)
+            {
+                throw new InvalidOperationException(
+                    "No certificate matching the configured RDP signing SHA-256 hash was found in CurrentUser\\My or LocalMachine\\My.");
+            }
+
+            if (!certificateWithPrivateKeyFound)
+            {
+                throw new InvalidOperationException(
+                    "The configured RDP signing certificate was found, but its private key is not available to the current user.");
+            }
+
+            if (!certificateIsCurrentlyValid)
+            {
+                throw new InvalidOperationException(
+                    "The configured RDP signing certificate is expired or not yet valid.");
+            }
+
+            throw new InvalidOperationException("The configured RDP signing certificate could not be used.");
+        }
+
+        private static List<string> ParseSettings(string content)
+        {
+            string normalized = content
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+
+            List<string> lines = normalized.Split('\n').ToList();
+            while (lines.Count > 0 && string.IsNullOrEmpty(lines[^1]))
+                lines.RemoveAt(lines.Count - 1);
+            return lines;
+        }
+
+        private static void RemoveExistingSignature(List<string> settings)
+        {
+            settings.RemoveAll(line =>
+                line.StartsWith("signscope:s:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("signature:s:", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void EnsureAlternateFullAddress(List<string> settings)
+        {
+            string? fullAddress = settings.FirstOrDefault(line =>
+                line.StartsWith("full address:s:", StringComparison.OrdinalIgnoreCase));
+            bool hasAlternateAddress = settings.Any(line =>
+                line.StartsWith("alternate full address:s:", StringComparison.OrdinalIgnoreCase));
+
+            if (fullAddress is null || hasAlternateAddress)
+                return;
+
+            string value = fullAddress["full address:s:".Length..];
+            if (!string.IsNullOrEmpty(value))
+                settings.Add("alternate full address:s:" + value);
+        }
+
+        private static byte[] BuildRdpSignatureBlob(byte[] pkcs7)
+        {
+            byte[] result = new byte[pkcs7.Length + 12];
+            result[0] = 1;
+            result[2] = 1;
+            result[4] = 1;
+            Array.Copy(BitConverter.GetBytes((uint)pkcs7.Length), 0, result, 8, 4);
+            Array.Copy(pkcs7, 0, result, 12, pkcs7.Length);
+            return result;
+        }
+
+        private static string FormatBase64(string value)
+        {
+            StringBuilder result = new(value.Length + value.Length / 64 + 1);
+            for (int offset = 0; offset < value.Length; offset += 64)
+            {
+                int length = Math.Min(64, value.Length - offset);
+                result.Append(value, offset, length).Append(' ');
+            }
+
+            return result.ToString();
+        }
+
+        private static int CountScopeEntries(string signedContent)
+        {
+            string? signScope = ParseSettings(signedContent).FirstOrDefault(line =>
+                line.StartsWith("signscope:s:", StringComparison.OrdinalIgnoreCase));
+            if (signScope is null)
+                return 0;
+
+            string value = signScope["signscope:s:".Length..];
+            return string.IsNullOrEmpty(value) ? 0 : value.Split(',').Length;
+        }
 
         private static SigningConfiguration ResolveSigningConfiguration()
         {
@@ -105,7 +373,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             string effectiveValue;
             string source;
-
             if (!string.IsNullOrWhiteSpace(processValue))
             {
                 effectiveValue = processValue;
@@ -158,297 +425,11 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
         }
 
-        private static void SignRdpFile(string operationId, string rdpPath, string certificateSha256Hash)
-        {
-            if (certificateSha256Hash.Length != 64)
-            {
-                throw new InvalidOperationException(
-                    $"The configured RDP signing certificate SHA-256 hash has {certificateSha256Hash.Length} hexadecimal characters; expected 64. " +
-                    "Use certificate.GetCertHashString(HashAlgorithmName.SHA256), not certificate.Thumbprint.");
-            }
-
-            SigningCertificate certificate = FindSigningCertificate(operationId, certificateSha256Hash);
-            string signerExecutable = Path.Combine(Environment.SystemDirectory, "rdpsign.exe");
-            if (!File.Exists(signerExecutable))
-                throw new FileNotFoundException("rdpsign.exe was not found.", signerExecutable);
-
-            WriteDiagnostic(operationId, certificate.Describe());
-            WriteDiagnostic(operationId, DescribeExecutable(signerExecutable));
-
-            RdpsignResult directResult = RunRdpsignDirect(
-                operationId,
-                signerExecutable,
-                certificateSha256Hash,
-                rdpPath);
-            if (directResult.ExitCode == 0)
-                return;
-
-            WriteDiagnostic(
-                operationId,
-                "The direct .NET process launch failed. Starting the PowerShell-hosted attempt with the same SHA-256 hash.");
-
-            RdpsignResult powerShellResult = RunRdpsignViaPowerShell(
-                operationId,
-                signerExecutable,
-                certificateSha256Hash,
-                rdpPath);
-            if (powerShellResult.ExitCode == 0)
-            {
-                Runtime.MessageCollector.AddMessage(
-                    MessageClass.WarningMsg,
-                    "rdpsign.exe failed when launched directly but succeeded through the PowerShell compatibility path. " +
-                    $"Diagnostics: {GetDiagnosticsLogPath()}");
-                return;
-            }
-
-            throw CreateRdpsignFailure(
-                directResult,
-                powerShellResult,
-                certificateSha256Hash,
-                certificate.Sha1Thumbprint,
-                rdpPath);
-        }
-
-        private static RdpsignResult RunRdpsignDirect(
-            string operationId,
-            string signerExecutable,
-            string certificateSha256Hash,
-            string rdpPath)
-        {
-            Encoding outputEncoding = GetRdpsignOutputEncoding();
-            string arguments = $"/sha256 {certificateSha256Hash} /v \"{rdpPath}\"";
-
-            WriteDiagnostic(operationId, "Attempt: direct rdpsign.exe process");
-            WriteDiagnostic(operationId, $"Command: \"{signerExecutable}\" {arguments}");
-            WriteDiagnostic(operationId, $"Output encoding: {outputEncoding.EncodingName} (code page {outputEncoding.CodePage})");
-
-            ProcessStartInfo startInfo = new(signerExecutable)
-            {
-                Arguments = arguments,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = outputEncoding,
-                StandardErrorEncoding = outputEncoding,
-                WorkingDirectory = Environment.SystemDirectory
-            };
-
-            return RunProcess(operationId, "direct rdpsign", startInfo);
-        }
-
-        private static RdpsignResult RunRdpsignViaPowerShell(
-            string operationId,
-            string signerExecutable,
-            string certificateSha256Hash,
-            string rdpPath)
-        {
-            string powerShellExecutable = Path.Combine(
-                Environment.SystemDirectory,
-                "WindowsPowerShell",
-                "v1.0",
-                "powershell.exe");
-            if (!File.Exists(powerShellExecutable))
-            {
-                return new RdpsignResult(
-                    -1,
-                    $"Windows PowerShell was not found at '{powerShellExecutable}'.");
-            }
-
-            string script = BuildPowerShellSigningScript(
-                signerExecutable,
-                certificateSha256Hash,
-                rdpPath);
-            string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-            Encoding outputEncoding = GetRdpsignOutputEncoding();
-
-            WriteDiagnostic(operationId, "Attempt: rdpsign.exe hosted by Windows PowerShell");
-            WriteDiagnostic(operationId, $"PowerShell executable: {powerShellExecutable}");
-            WriteDiagnostic(operationId, "PowerShell script:" + Environment.NewLine + script);
-            WriteDiagnostic(operationId, $"PowerShell encoded command length: {encodedCommand.Length}");
-            WriteDiagnostic(operationId, $"Output encoding: {outputEncoding.EncodingName} (code page {outputEncoding.CodePage})");
-
-            ProcessStartInfo startInfo = new(powerShellExecutable)
-            {
-                Arguments =
-                    "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
-                    encodedCommand,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = outputEncoding,
-                StandardErrorEncoding = outputEncoding,
-                WorkingDirectory = Environment.SystemDirectory
-            };
-
-            return RunProcess(operationId, "PowerShell-hosted rdpsign", startInfo);
-        }
-
-        private static RdpsignResult RunProcess(
-            string operationId,
-            string processDescription,
-            ProcessStartInfo startInfo)
-        {
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            using Process process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException($"{processDescription} did not return a process instance.");
-
-            WriteDiagnostic(operationId, $"{processDescription} process started. PID={process.Id}.");
-
-            string standardOutput = process.StandardOutput.ReadToEnd();
-            string standardError = process.StandardError.ReadToEnd();
-            if (!process.WaitForExit((int)SigningTimeout.TotalMilliseconds))
-            {
-                try
-                {
-                    process.Kill();
-                }
-                catch (Exception killException)
-                {
-                    WriteDiagnostic(
-                        operationId,
-                        $"Unable to terminate timed-out {processDescription} process: {killException}");
-                }
-
-                throw new TimeoutException($"{processDescription} timed out after 30 seconds.");
-            }
-
-            stopwatch.Stop();
-            string output = string.Join(
-                Environment.NewLine,
-                new[] { standardError, standardOutput }
-                    .Where(value => !string.IsNullOrWhiteSpace(value))
-                    .Select(value => value.Trim()));
-
-            WriteDiagnostic(
-                operationId,
-                $"{processDescription} exited after {stopwatch.ElapsedMilliseconds} ms with {FormatExitCode(process.ExitCode)}.");
-            WriteDiagnostic(
-                operationId,
-                string.IsNullOrWhiteSpace(output)
-                    ? $"{processDescription} produced no stdout/stderr output."
-                    : $"{processDescription} stdout/stderr:" + Environment.NewLine + output);
-
-            return new RdpsignResult(process.ExitCode, output);
-        }
-
-        private static SigningCertificate FindSigningCertificate(
-            string operationId,
-            string certificateSha256Hash)
-        {
-            bool certificateFound = false;
-            bool certificateWithPrivateKeyFound = false;
-            bool certificateIsCurrentlyValid = false;
-
-            foreach (StoreLocation storeLocation in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
-            {
-                using X509Store store = new(StoreName.My, storeLocation);
-                try
-                {
-                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-                    WriteDiagnostic(
-                        operationId,
-                        $"Opened certificate store {storeLocation}\\My; certificate count={store.Certificates.Count}.");
-                }
-                catch (Exception exception)
-                {
-                    WriteDiagnostic(operationId, $"Unable to open certificate store {storeLocation}\\My: {exception}");
-                    continue;
-                }
-
-                foreach (X509Certificate2 candidate in store.Certificates)
-                {
-                    string candidateSha256Hash = NormalizeHash(
-                        candidate.GetCertHashString(HashAlgorithmName.SHA256));
-                    if (!string.Equals(
-                            candidateSha256Hash,
-                            certificateSha256Hash,
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    certificateFound = true;
-                    string sha1Thumbprint = NormalizeHash(candidate.Thumbprint);
-                    WriteDiagnostic(
-                        operationId,
-                        $"Matched certificate in {storeLocation}\\My: Subject='{candidate.Subject}', " +
-                        $"SHA1={sha1Thumbprint}, SHA256={candidateSha256Hash}, " +
-                        $"HasPrivateKey={candidate.HasPrivateKey}, NotBefore={candidate.NotBefore:O}, NotAfter={candidate.NotAfter:O}.");
-
-                    if (!candidate.HasPrivateKey)
-                        continue;
-
-                    certificateWithPrivateKeyFound = true;
-                    DateTime now = DateTime.Now;
-                    if (now < candidate.NotBefore || now > candidate.NotAfter)
-                        continue;
-
-                    certificateIsCurrentlyValid = true;
-                    return new SigningCertificate(
-                        storeLocation,
-                        candidate.Subject,
-                        sha1Thumbprint,
-                        candidateSha256Hash,
-                        candidate.NotBefore,
-                        candidate.NotAfter,
-                        candidate.HasPrivateKey);
-                }
-            }
-
-            if (!certificateFound)
-            {
-                throw new InvalidOperationException(
-                    "No certificate matching the configured RDP signing SHA-256 hash was found in CurrentUser\\My or LocalMachine\\My.");
-            }
-
-            if (!certificateWithPrivateKeyFound)
-            {
-                throw new InvalidOperationException(
-                    "The configured RDP signing certificate was found, but its private key is not available to the current user.");
-            }
-
-            if (!certificateIsCurrentlyValid)
-            {
-                throw new InvalidOperationException(
-                    "The configured RDP signing certificate is expired or not yet valid.");
-            }
-
-            throw new InvalidOperationException("The configured RDP signing certificate could not be used.");
-        }
-
-        private static InvalidOperationException CreateRdpsignFailure(
-            RdpsignResult directResult,
-            RdpsignResult powerShellResult,
-            string certificateSha256Hash,
-            string certificateSha1Thumbprint,
-            string rdpPath)
-        {
-            StringBuilder details = new();
-            details.Append("Both rdpsign launch methods failed. Direct exit code ")
-                .Append(FormatExitCode(directResult.ExitCode))
-                .Append("; PowerShell-hosted exit code ")
-                .Append(FormatExitCode(powerShellResult.ExitCode))
-                .AppendLine(".")
-                .Append("SHA-256 hash: ")
-                .AppendLine(certificateSha256Hash)
-                .Append("Certificate SHA-1 thumbprint (diagnostic only): ")
-                .AppendLine(certificateSha1Thumbprint)
-                .Append("RDP file: ")
-                .AppendLine(rdpPath)
-                .Append("Diagnostics log: ")
-                .AppendLine(GetDiagnosticsLogPath());
-
-            return new InvalidOperationException(details.ToString().TrimEnd());
-        }
-
         private static void ReportSigningFailure(Exception exception, string operationId)
         {
             string logMessage =
-                "Unable to sign the temporary RDP file. mstsc will continue with an unsigned file. " +
+                "Unable to sign the temporary RDP file in-process. mstsc will continue with an unsigned file. " +
                 $"Signing diagnostics operation={operationId}; file={GetDiagnosticsLogPath()}";
-
             Runtime.MessageCollector.AddExceptionStackTrace(logMessage, exception);
 
             if (Interlocked.Exchange(ref _signingFailureNotificationShown, 1) != 0)
@@ -504,7 +485,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 $"  OS: {RuntimeInformation.OSDescription}",
                 $"  OS architecture: {RuntimeInformation.OSArchitecture}",
                 $"  Process architecture: {RuntimeInformation.ProcessArchitecture}",
-                $"  64-bit OS/process: {Environment.Is64BitOperatingSystem}/{Environment.Is64BitProcess}",
                 $"  Current directory: {Environment.CurrentDirectory}",
                 $"  System directory: {Environment.SystemDirectory}");
         }
@@ -533,40 +513,16 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
         }
 
-        private static string DescribeExecutable(string path)
-        {
-            try
-            {
-                FileVersionInfo version = FileVersionInfo.GetVersionInfo(path);
-                return string.Join(
-                    Environment.NewLine,
-                    "rdpsign executable:",
-                    $"  Path: {path}",
-                    $"  File version: {version.FileVersion}",
-                    $"  Product version: {version.ProductVersion}",
-                    $"  File length: {new FileInfo(path).Length}");
-            }
-            catch (Exception exception)
-            {
-                return $"Unable to inspect rdpsign executable '{path}': {exception}";
-            }
-        }
-
-        private static Encoding GetRdpsignOutputEncoding()
-        {
-            try
-            {
-                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-                return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
-            }
-            catch
-            {
-                return Encoding.UTF8;
-            }
-        }
-
-        private static string FormatExitCode(int exitCode) =>
-            $"0x{unchecked((uint)exitCode):X8} ({exitCode})";
+        private static string DescribeCertificate(X509Certificate2 certificate) => string.Join(
+            Environment.NewLine,
+            "Selected certificate:",
+            $"  Subject: {certificate.Subject}",
+            $"  SHA-1 thumbprint: {NormalizeHash(certificate.Thumbprint)}",
+            $"  SHA-256 hash: {NormalizeHash(certificate.GetCertHashString(HashAlgorithmName.SHA256))}",
+            $"  Has private key: {certificate.HasPrivateKey}",
+            $"  Signature algorithm: {certificate.SignatureAlgorithm.FriendlyName}",
+            $"  Not before: {certificate.NotBefore:O}",
+            $"  Not after: {certificate.NotAfter:O}");
 
         private static void WriteDiagnostic(string operationId, string message)
         {
@@ -588,7 +544,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
                     string entry =
                         $"[{DateTimeOffset.Now:O}] [{operationId}] {message}{Environment.NewLine}";
-                    File.AppendAllText(path, entry, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.AppendAllText(
+                        path,
+                        entry,
+                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
             }
             catch
@@ -596,8 +555,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 // Diagnostics must never block an RDP launch.
             }
         }
-
-        private readonly record struct RdpsignResult(int ExitCode, string Output);
 
         private readonly record struct SigningConfiguration(
             string EffectiveHash,
@@ -619,27 +576,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 $"  Machine environment: {MachineValue} (length {MachineValue.Length})",
                 $"  File: {FilePath}",
                 $"  File value: {FileValue} (length {FileValue.Length})");
-        }
-
-        private readonly record struct SigningCertificate(
-            StoreLocation StoreLocation,
-            string Subject,
-            string Sha1Thumbprint,
-            string Sha256Hash,
-            DateTime NotBefore,
-            DateTime NotAfter,
-            bool HasPrivateKey)
-        {
-            internal string Describe() => string.Join(
-                Environment.NewLine,
-                "Selected certificate:",
-                $"  Store: {StoreLocation}\\My",
-                $"  Subject: {Subject}",
-                $"  SHA-1 thumbprint: {Sha1Thumbprint}",
-                $"  SHA-256 hash: {Sha256Hash}",
-                $"  Has private key: {HasPrivateKey}",
-                $"  Not before: {NotBefore:O}",
-                $"  Not after: {NotAfter:O}");
         }
     }
 }
