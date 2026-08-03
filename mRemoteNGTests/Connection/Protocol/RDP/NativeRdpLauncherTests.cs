@@ -1,4 +1,7 @@
+using System;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using mRemoteNG.Connection;
 using mRemoteNG.Connection.Protocol.RDP;
 using NUnit.Framework;
@@ -57,8 +60,8 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
 
             Assert.That(restrictedArguments, Does.Contain("/restrictedAdmin"));
             Assert.That(remoteGuardArguments, Does.Contain("/remoteGuard"));
-            Assert.That(restrictedArguments.Any(x => x.Contains("password", System.StringComparison.OrdinalIgnoreCase)), Is.False);
-            Assert.That(remoteGuardArguments.Any(x => x.Contains("password", System.StringComparison.OrdinalIgnoreCase)), Is.False);
+            Assert.That(restrictedArguments.Any(x => x.Contains("password", StringComparison.OrdinalIgnoreCase)), Is.False);
+            Assert.That(remoteGuardArguments.Any(x => x.Contains("password", StringComparison.OrdinalIgnoreCase)), Is.False);
         }
 
         [Test]
@@ -81,16 +84,32 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
         }
 
         [Test]
-        public void PowerShellSigningScriptEscapesSingleQuotesInPaths()
+        public void ManagedSignerAddsScopeAlternateAddressAndSignature()
         {
-            string script = NativeRdpFileSigner.BuildPowerShellSigningScript(
-                "C:\\Windows\\System32\\rdpsign.exe",
-                new string('A', 64),
-                "C:\\Temp\\Admin's server.rdp");
+            using RSA key = RSA.Create(2048);
+            CertificateRequest request = new(
+                "CN=mRemoteNG managed signing test",
+                key,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1);
+            request.CertificateExtensions.Add(
+                new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: true));
 
-            Assert.That(script, Does.Contain("/sha256"));
-            Assert.That(script, Does.Contain("Admin''s server.rdp"));
-            Assert.That(script, Does.Contain("exit $LASTEXITCODE"));
+            using X509Certificate2 certificate = request.CreateSelfSigned(
+                DateTimeOffset.UtcNow.AddMinutes(-1),
+                DateTimeOffset.UtcNow.AddDays(1));
+
+            const string source =
+                "full address:s:test.example.local\r\n" +
+                "server port:i:3389\r\n" +
+                "redirectclipboard:i:1\r\n";
+
+            string signed = NativeRdpFileSigner.SignContent(source, certificate);
+
+            Assert.That(signed, Does.Contain("alternate full address:s:test.example.local\r\n"));
+            Assert.That(signed, Does.Contain(
+                "signscope:s:Full Address,Alternate Full Address,Server Port,RedirectClipboard\r\n"));
+            Assert.That(signed, Does.Match(@"signature:s:[A-Za-z0-9+/= ]+\r\n$"));
         }
     }
 }
