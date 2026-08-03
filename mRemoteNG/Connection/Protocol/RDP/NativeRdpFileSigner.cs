@@ -20,7 +20,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private const string SigningHashEnvironmentVariable = "MREMOTENG_RDP_SIGN_CERT_THUMBPRINT";
         private const string SigningHashFileName = "native-rdp-signing-thumbprint.txt";
         private const string DiagnosticsLogFileName = "native-rdp-signing.log";
-        private const uint CryptENotFound = 0x80092004u;
         private const long MaximumDiagnosticsLogSize = 2 * 1024 * 1024;
 
         private static readonly TimeSpan SigningTimeout = TimeSpan.FromSeconds(30);
@@ -77,8 +76,24 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 .ToArray());
         }
 
-        internal static bool IsCertificateLookupFailure(int exitCode) =>
-            unchecked((uint)exitCode) == CryptENotFound;
+        internal static string BuildPowerShellSigningScript(
+            string signerExecutable,
+            string certificateSha256Hash,
+            string rdpPath)
+        {
+            string signerLiteral = EscapePowerShellSingleQuotedLiteral(signerExecutable);
+            string hashLiteral = EscapePowerShellSingleQuotedLiteral(certificateSha256Hash);
+            string pathLiteral = EscapePowerShellSingleQuotedLiteral(rdpPath);
+
+            return string.Join(
+                Environment.NewLine,
+                "$ErrorActionPreference = 'Continue'",
+                $"& '{signerLiteral}' /sha256 '{hashLiteral}' /v '{pathLiteral}'",
+                "exit $LASTEXITCODE");
+        }
+
+        internal static string EscapePowerShellSingleQuotedLiteral(string value) =>
+            (value ?? string.Empty).Replace("'", "''", StringComparison.Ordinal);
 
         private static SigningConfiguration ResolveSigningConfiguration()
         {
@@ -160,66 +175,50 @@ namespace mRemoteNG.Connection.Protocol.RDP
             WriteDiagnostic(operationId, certificate.Describe());
             WriteDiagnostic(operationId, DescribeExecutable(signerExecutable));
 
-            RdpsignResult primaryResult = RunRdpsign(
+            RdpsignResult directResult = RunRdpsignDirect(
                 operationId,
-                "configured SHA-256 hash",
                 signerExecutable,
                 certificateSha256Hash,
                 rdpPath);
-            if (primaryResult.ExitCode == 0)
+            if (directResult.ExitCode == 0)
                 return;
 
             WriteDiagnostic(
                 operationId,
-                $"Primary attempt failed. IsCertificateLookupFailure={IsCertificateLookupFailure(primaryResult.ExitCode)}.");
+                "The direct .NET process launch failed. Starting the PowerShell-hosted attempt with the same SHA-256 hash.");
 
-            if (IsCertificateLookupFailure(primaryResult.ExitCode) &&
-                !string.IsNullOrWhiteSpace(certificate.Sha1Thumbprint))
+            RdpsignResult powerShellResult = RunRdpsignViaPowerShell(
+                operationId,
+                signerExecutable,
+                certificateSha256Hash,
+                rdpPath);
+            if (powerShellResult.ExitCode == 0)
             {
-                WriteDiagnostic(operationId, "Starting compatibility attempt with the certificate SHA-1 thumbprint.");
-                RdpsignResult compatibilityResult = RunRdpsign(
-                    operationId,
-                    "SHA-1 thumbprint compatibility value",
-                    signerExecutable,
-                    certificate.Sha1Thumbprint,
-                    rdpPath);
-
-                if (compatibilityResult.ExitCode == 0)
-                {
-                    Runtime.MessageCollector.AddMessage(
-                        MessageClass.WarningMsg,
-                        "rdpsign.exe succeeded using the certificate SHA-1 thumbprint compatibility fallback. " +
-                        $"Diagnostics: {GetDiagnosticsLogPath()}");
-                    return;
-                }
-
-                throw CreateRdpsignFailure(
-                    primaryResult,
-                    compatibilityResult,
-                    certificateSha256Hash,
-                    certificate.Sha1Thumbprint,
-                    rdpPath);
+                Runtime.MessageCollector.AddMessage(
+                    MessageClass.WarningMsg,
+                    "rdpsign.exe failed when launched directly but succeeded through the PowerShell compatibility path. " +
+                    $"Diagnostics: {GetDiagnosticsLogPath()}");
+                return;
             }
 
             throw CreateRdpsignFailure(
-                primaryResult,
-                null,
+                directResult,
+                powerShellResult,
                 certificateSha256Hash,
                 certificate.Sha1Thumbprint,
                 rdpPath);
         }
 
-        private static RdpsignResult RunRdpsign(
+        private static RdpsignResult RunRdpsignDirect(
             string operationId,
-            string attemptName,
             string signerExecutable,
-            string certificateHash,
+            string certificateSha256Hash,
             string rdpPath)
         {
             Encoding outputEncoding = GetRdpsignOutputEncoding();
-            string arguments = $"/sha256 {certificateHash} /v \"{rdpPath}\"";
+            string arguments = $"/sha256 {certificateSha256Hash} /v \"{rdpPath}\"";
 
-            WriteDiagnostic(operationId, $"Attempt: {attemptName}");
+            WriteDiagnostic(operationId, "Attempt: direct rdpsign.exe process");
             WriteDiagnostic(operationId, $"Command: \"{signerExecutable}\" {arguments}");
             WriteDiagnostic(operationId, $"Output encoding: {outputEncoding.EncodingName} (code page {outputEncoding.CodePage})");
 
@@ -235,26 +234,84 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 WorkingDirectory = Environment.SystemDirectory
             };
 
+            return RunProcess(operationId, "direct rdpsign", startInfo);
+        }
+
+        private static RdpsignResult RunRdpsignViaPowerShell(
+            string operationId,
+            string signerExecutable,
+            string certificateSha256Hash,
+            string rdpPath)
+        {
+            string powerShellExecutable = Path.Combine(
+                Environment.SystemDirectory,
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe");
+            if (!File.Exists(powerShellExecutable))
+            {
+                return new RdpsignResult(
+                    -1,
+                    $"Windows PowerShell was not found at '{powerShellExecutable}'.");
+            }
+
+            string script = BuildPowerShellSigningScript(
+                signerExecutable,
+                certificateSha256Hash,
+                rdpPath);
+            string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+            Encoding outputEncoding = GetRdpsignOutputEncoding();
+
+            WriteDiagnostic(operationId, "Attempt: rdpsign.exe hosted by Windows PowerShell");
+            WriteDiagnostic(operationId, $"PowerShell executable: {powerShellExecutable}");
+            WriteDiagnostic(operationId, "PowerShell script:" + Environment.NewLine + script);
+            WriteDiagnostic(operationId, $"PowerShell encoded command length: {encodedCommand.Length}");
+            WriteDiagnostic(operationId, $"Output encoding: {outputEncoding.EncodingName} (code page {outputEncoding.CodePage})");
+
+            ProcessStartInfo startInfo = new(powerShellExecutable)
+            {
+                Arguments =
+                    "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
+                    encodedCommand,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = outputEncoding,
+                StandardErrorEncoding = outputEncoding,
+                WorkingDirectory = Environment.SystemDirectory
+            };
+
+            return RunProcess(operationId, "PowerShell-hosted rdpsign", startInfo);
+        }
+
+        private static RdpsignResult RunProcess(
+            string operationId,
+            string processDescription,
+            ProcessStartInfo startInfo)
+        {
             Stopwatch stopwatch = Stopwatch.StartNew();
-            using Process signer = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("rdpsign.exe did not return a process instance.");
+            using Process process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException($"{processDescription} did not return a process instance.");
 
-            WriteDiagnostic(operationId, $"rdpsign process started. PID={signer.Id}.");
+            WriteDiagnostic(operationId, $"{processDescription} process started. PID={process.Id}.");
 
-            string standardOutput = signer.StandardOutput.ReadToEnd();
-            string standardError = signer.StandardError.ReadToEnd();
-            if (!signer.WaitForExit((int)SigningTimeout.TotalMilliseconds))
+            string standardOutput = process.StandardOutput.ReadToEnd();
+            string standardError = process.StandardError.ReadToEnd();
+            if (!process.WaitForExit((int)SigningTimeout.TotalMilliseconds))
             {
                 try
                 {
-                    signer.Kill();
+                    process.Kill();
                 }
                 catch (Exception killException)
                 {
-                    WriteDiagnostic(operationId, "Unable to terminate timed-out rdpsign process: " + killException);
+                    WriteDiagnostic(
+                        operationId,
+                        $"Unable to terminate timed-out {processDescription} process: {killException}");
                 }
 
-                throw new TimeoutException("Signing the temporary RDP file timed out after 30 seconds.");
+                throw new TimeoutException($"{processDescription} timed out after 30 seconds.");
             }
 
             stopwatch.Stop();
@@ -266,14 +323,14 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             WriteDiagnostic(
                 operationId,
-                $"rdpsign exited after {stopwatch.ElapsedMilliseconds} ms with {FormatExitCode(signer.ExitCode)}.");
+                $"{processDescription} exited after {stopwatch.ElapsedMilliseconds} ms with {FormatExitCode(process.ExitCode)}.");
             WriteDiagnostic(
                 operationId,
                 string.IsNullOrWhiteSpace(output)
-                    ? "rdpsign produced no stdout/stderr output."
-                    : "rdpsign stdout/stderr:" + Environment.NewLine + output);
+                    ? $"{processDescription} produced no stdout/stderr output."
+                    : $"{processDescription} stdout/stderr:" + Environment.NewLine + output);
 
-            return new RdpsignResult(signer.ExitCode, output);
+            return new RdpsignResult(process.ExitCode, output);
         }
 
         private static SigningCertificate FindSigningCertificate(
@@ -290,7 +347,9 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 try
                 {
                     store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
-                    WriteDiagnostic(operationId, $"Opened certificate store {storeLocation}\\My; certificate count={store.Certificates.Count}.");
+                    WriteDiagnostic(
+                        operationId,
+                        $"Opened certificate store {storeLocation}\\My; certificate count={store.Certificates.Count}.");
                 }
                 catch (Exception exception)
                 {
@@ -360,31 +419,21 @@ namespace mRemoteNG.Connection.Protocol.RDP
         }
 
         private static InvalidOperationException CreateRdpsignFailure(
-            RdpsignResult primaryResult,
-            RdpsignResult? compatibilityResult,
+            RdpsignResult directResult,
+            RdpsignResult powerShellResult,
             string certificateSha256Hash,
             string certificateSha1Thumbprint,
             string rdpPath)
         {
             StringBuilder details = new();
-            if (compatibilityResult.HasValue)
-            {
-                details.Append("Both rdpsign attempts failed. Primary exit code ")
-                    .Append(FormatExitCode(primaryResult.ExitCode))
-                    .Append("; compatibility exit code ")
-                    .Append(FormatExitCode(compatibilityResult.Value.ExitCode))
-                    .AppendLine(".");
-            }
-            else
-            {
-                details.Append("rdpsign.exe failed with exit code ")
-                    .Append(FormatExitCode(primaryResult.ExitCode))
-                    .AppendLine(".");
-            }
-
-            details.Append("SHA-256 hash: ")
+            details.Append("Both rdpsign launch methods failed. Direct exit code ")
+                .Append(FormatExitCode(directResult.ExitCode))
+                .Append("; PowerShell-hosted exit code ")
+                .Append(FormatExitCode(powerShellResult.ExitCode))
+                .AppendLine(".")
+                .Append("SHA-256 hash: ")
                 .AppendLine(certificateSha256Hash)
-                .Append("SHA-1 thumbprint: ")
+                .Append("Certificate SHA-1 thumbprint (diagnostic only): ")
                 .AppendLine(certificateSha1Thumbprint)
                 .Append("RDP file: ")
                 .AppendLine(rdpPath)
