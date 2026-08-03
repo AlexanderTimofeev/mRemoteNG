@@ -1,123 +1,132 @@
-# Native Windows RDP client (`mstsc.exe`)
+# Native RDP client: `mstsc.exe`
 
 ## Goal
 
-Allow an ordinary mRemoteNG RDP connection to open in the native Windows Remote Desktop client while retaining the existing RDP property UI and `ConnectionInfo` model.
+Allow a normal mRemoteNG RDP connection to open in the native Windows Remote Desktop client while retaining the existing RDP connection editor and `ConnectionInfo` model.
 
-The user never creates, edits, validates, selects, or maintains an `.rdp` file. On every native launch, mRemoteNG resolves the effective connection and credential values, generates a fresh temporary file, supplies passwords through Windows Credential Manager, starts `mstsc.exe`, and performs best-effort cleanup.
+The user never creates, selects, validates, updates, or maintains an `.rdp` file. For every native launch, mRemoteNG resolves the effective connection, generates a temporary file, supplies eligible credentials through Windows Credential Manager, starts `mstsc.exe`, and performs best-effort cleanup.
 
 ## User-facing behavior
 
 Each RDP connection has an **RDP Client** property:
 
-- `Embedded` — existing ActiveX/MSTSCLib behavior inside an mRemoteNG tab.
-- `NativeMstsc` — launch the system `mstsc.exe` as a top-level Windows window.
+- `Embedded mRemoteNG tab` — existing ActiveX/MSTSCLib behavior.
+- `mstsc (Native Windows Remote Desktop client)` — opens the system client as a separate top-level window.
 
-The protocol remains `RDP`; it is not converted to `Ext.App`, so the complete RDP property set remains visible in the connection editor.
+The protocol remains `RDP`; it is not converted to `Ext.App`, so the existing RDP properties remain available.
 
 Compatibility rules:
 
-- existing XML or SQL connections without `RdpClientMode` load as `Embedded`;
-- invalid stored values also fall back to `Embedded`;
-- the setting is per connection and is intentionally not inherited in the first implementation.
+- old XML and SQL connections without `RdpClientMode` load as `Embedded`;
+- invalid stored values fall back to `Embedded`;
+- the mode is stored per connection and is intentionally not folder-inherited in the first implementation.
 
 ## Launch architecture
 
-Native launch is selected before mRemoteNG creates an embedded protocol control, panel, tab, or MSTSCLib COM object.
+Native mode branches before mRemoteNG creates a panel, tab, protocol instance, ActiveX control, or MSTSCLib COM object.
 
 High-level flow:
 
-1. Resolve effective connection values, including inherited values, linked credentials, alternate address, runtime hostname resolution, wait-for-host handling, and `Force.NoCredentials`.
+1. Resolve the runtime hostname, alternate address, inherited/linked values, and wait-for-host behavior.
 2. Run the configured pre-connection external application.
-3. For `RDP + NativeMstsc`, validate that the selected options have a safe native equivalent.
+3. Validate that the selected connection options have a safe native equivalent.
 4. Resolve destination and RD Gateway credentials.
-5. Write eligible passwords to Windows Credential Manager.
-6. Generate a unique temporary `.rdp` file from the effective settings.
-7. Start `mstsc.exe` with the file and native-only command-line switches.
-8. Return without entering the embedded protocol lifecycle.
+5. Write eligible password credentials through `CredWriteW`.
+6. Generate a unique temporary UTF-16LE `.rdp` file.
+7. Launch `%SystemRoot%\System32\mstsc.exe` using `ProcessStartInfo.ArgumentList`.
+8. Schedule temporary-file cleanup and return without entering the embedded protocol lifecycle.
 
-`NativeRdpLauncher` is deliberately not a `ProtocolBase` implementation. `ProtocolBase` assumes a hosted WinForms control, mRemoteNG tab lifecycle, and embedded connection events that a top-level `mstsc.exe` process cannot reliably provide.
+`NativeRdpLauncher` is deliberately not a `ProtocolBase`. `ProtocolBase` assumes a hosted WinForms control and an mRemoteNG-managed connection lifecycle that a separate `mstsc.exe` process cannot reliably expose.
 
 ## Components
 
 ### `RdpFileSerializer`
 
-Serializes effective `ConnectionInfo` values into a deterministic UTF-16LE `.rdp` document. It never writes a plaintext password or `password 51` value.
+Creates an mstsc-compatible `.rdp` document from effective `ConnectionInfo` values.
 
 Implemented mappings include:
 
-- hostname, custom port, resolved username and domain hint;
-- fullscreen, predefined resolutions, custom width/height, SmartSize, dynamic resolution and multimonitor mode;
-- color depth, desktop scale percentage and bitmap cache;
-- wallpaper, themes, font smoothing, desktop composition and UI-performance flags;
-- clipboard, printers, COM ports, smart cards and drive redirection;
-- drive modes preserve `None`, `All`, local fixed drives and custom drive-letter lists;
-- remote audio, quality, microphone capture and WebAuthn;
-- authentication level, CredSSP, credential prompting, load-balance information, redirection server name and Entra/AAD authentication flag;
-- RD Gateway host, usage method, credential source, username hint, shared-credential behavior and access-token property;
-- alternate shell/start program, working directory and RemoteApp program/arguments.
+- hostname, IPv6 formatting, custom port, username/domain hints;
+- fullscreen, predefined/custom resolution, SmartSize, dynamic resolution and multimonitor;
+- color depth, desktop scaling and bitmap cache;
+- wallpaper, themes, font smoothing, desktop composition and performance flags;
+- keyboard handling, clipboard, printers, COM ports, smart cards and drive redirection;
+- `None`, all drives, local fixed drives and custom drive-letter modes;
+- remote audio, audio quality, microphone and WebAuthn;
+- authentication level, CredSSP, prompt behavior, load-balance information, redirection-server name and Entra/AAD authentication;
+- explicit RD Gateway profile, usage mode, password/smart-card/token credential source and shared-credential behavior;
+- alternate shell, working directory and RemoteApp program/arguments.
 
-Properties that exist only for the embedded ActiveX lifecycle are not serialized, including the selected COM control version, mRemoteNG tab resize behavior, idle-timeout callbacks, view-only input filtering and embedded reconnect events.
+Security rules:
 
-A stored `RDPSignScope`/`RDPSignature` pair is not copied. A signature covers the original RDP payload and becomes invalid after mRemoteNG regenerates the file. Generated files are therefore intentionally unsigned.
+- no destination or gateway password is written to the file;
+- `password 51` is never generated;
+- CR, LF and NUL characters in string values are replaced so imported configuration values cannot inject additional RDP directives;
+- a gateway access token is serialized only for Access Token mode and only when the launch is allowed to inject credentials;
+- a stored `RDPSignScope`/`RDPSignature` is not copied because regenerating the payload invalidates the signature.
 
-Microsoft's current property reference is:
+Microsoft references:
 
 - <https://learn.microsoft.com/en-us/azure/virtual-desktop/rdp-properties>
+- <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/mstsc>
 
 ### `RdpCredentialResolver`
 
-Resolves the credentials that embedded RDP would otherwise obtain inside `RdpProtocol.SetCredentials()`.
+Resolves credentials without requiring an ActiveX control.
 
-Destination credential sources supported by native mode:
+Supported sources:
 
-- credentials stored directly on the connection;
-- inherited and linked credential records through the normal `ConnectionInfo` getters;
-- Windows current-user or configured default credentials when the connection username is empty;
+- direct connection values;
+- inherited and linked credential values through normal `ConnectionInfo` getters;
+- Windows current-user defaults;
+- configured default username, domain and password;
 - Delinea Secret Server;
 - Clickstudios Passwordstate;
 - 1Password CLI;
 - Password Safe;
 - Vault/OpenBao;
-- Microsoft LAPS.
+- Microsoft LAPS;
+- separate RD Gateway credentials and providers.
 
-The resolver also:
+The default password/domain fallback follows embedded RDP behavior even when the connection already contains an explicit username.
 
-- splits `DOMAIN\user` into its domain and username components;
-- preserves UPN usernames;
-- resolves separate RD Gateway credentials and providers;
-- reuses destination credentials when `RDGatewayUseConnectionCredentials = Yes`;
-- skips password resolution for `Force.NoCredentials`, prompt-only, Restricted Admin and Remote Credential Guard launches.
+Credential injection is disabled for:
 
-A provider failure is reported as an actionable native-launch error; the code does not silently fall back to stale or empty credentials.
+- `Force.NoCredentials`;
+- `AlwaysPromptForCredentials`;
+- Restricted Admin;
+- Remote Credential Guard;
+- smart-card gateway authentication;
+- access-token gateway authentication for password storage.
+
+Restricted Admin and Remote Credential Guard do not receive username/domain hints in the generated file; Windows uses the integrated current-user security context.
+
+A credential-provider failure aborts the native launch with an actionable error rather than silently using stale or empty values.
 
 ### `WindowsCredentialManager`
 
-Uses `CredWriteW` directly to store mstsc credentials under the conventional targets:
+Uses Win32 Credential Manager directly.
+
+Targets:
 
 - destination: `TERMSRV/<normalized-destination-host>`;
-- separate gateway credentials: `TERMSRV/<normalized-gateway-host>`.
-
-`CredDeleteW` is available through the same wrapper for explicit cleanup/integration with the existing clear-cached-credentials action.
+- separate gateway credential: `TERMSRV/<normalized-gateway-host>`.
 
 The implementation does not use:
 
+- BAT or PowerShell helper files;
 - `cmdkey.exe`;
-- BAT/PowerShell helpers;
 - shell interpolation;
-- a password-bearing process argument;
-- a password field in the generated `.rdp` file.
+- password-bearing command-line arguments;
+- plaintext passwords in `.rdp` files.
 
-Credentials are not written when:
+Credentials use local-machine persistence for the current Windows user. This avoids a race in which mstsc reads credentials after its bootstrap process changes or exits. It also means a successful native launch can update an existing Windows credential for the same `TERMSRV` target.
 
-- `Force.NoCredentials` is active;
-- username or password is empty;
-- `AlwaysPromptForCredentials` is enabled;
-- Restricted Admin is enabled;
-- Remote Credential Guard is enabled;
-- smart-card or access-token gateway authentication is selected.
+The existing **Clear Cached RDP Credentials** action removes both:
 
-The baseline implementation persists the credential in Windows Credential Manager. This avoids a race where mstsc reads credentials after the bootstrap process exits and avoids relying on an unreliable one-process/one-session lifetime relationship. Prompt-only behavior remains available through `AlwaysPromptForCredentials`.
+- mRemoteNG-created `Generic` credentials;
+- mstsc-created `DomainPassword` credentials;
+- destination and configured RD Gateway targets.
 
 ### `TemporaryRdpFileStore`
 
@@ -127,172 +136,156 @@ Files are created under:
 
 Behavior:
 
-- a unique file is generated for every launch;
-- the user's global `Documents\Default.rdp` is never modified;
-- launch failure triggers immediate best-effort deletion;
-- successful launch schedules deletion after a short bootstrap delay;
-- files older than one day are removed before a later native launch;
-- a crash may temporarily leave a file, but no user maintenance is required because a later native launch performs stale cleanup.
+- unique file per launch;
+- never modifies `Documents\Default.rdp`;
+- immediate best-effort deletion on launch failure;
+- scheduled deletion 30 seconds after a successful process start;
+- files older than five minutes are removed before a later native launch;
+- a process crash can temporarily leave a file, but no manual maintenance is required.
 
-The directory is inside the current user's Local AppData profile. The file contains connection settings and may contain an RD Gateway access token when that property is configured, but never a destination or gateway password.
+The file can contain connection settings and, specifically for gateway Access Token mode, a gateway token. It never contains a destination or gateway password.
 
 ### `NativeRdpLauncher`
 
-Coordinates validation, credential preparation, temporary-file creation, process arguments, launch logging and cleanup.
+Coordinates validation, credential resolution, Credential Manager writes, serialization, process launch, logging and cleanup.
 
-The executable is resolved as:
-
-`Path.Combine(Environment.SystemDirectory, "mstsc.exe")`
-
-`ProcessStartInfo.ArgumentList` is used instead of manually quoted argument strings.
-
-Native-only switches are added when applicable:
+Native switches are added when applicable:
 
 - `/admin`;
-- `/f` for a forced fullscreen launch;
+- `/f`;
 - `/restrictedAdmin`;
 - `/remoteGuard`;
 - `/prompt`.
 
-The generated `.rdp` supplies the remaining connection settings. The documented mstsc command-line reference is:
-
-- <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/mstsc>
-
-## Persistence
-
-### XML files
-
-The optional attribute is written as:
-
-`RdpClientMode="Embedded|NativeMstsc"`
-
-Implemented changes:
-
-- `AbstractConnectionRecord` property and default enum value;
-- XML serializer output;
-- backward-compatible XML deserialization;
-- optional XSD attribute;
-- normal clone/copy behavior through the existing connection-property mechanism.
-
-### SQL database mode
-
-SQL persistence uses an explicit `tblCons` DataTable schema, so the new value is mapped explicitly in:
-
-- expected schema;
-- row dirty checking;
-- row serialization;
-- backward-compatible deserialization.
-
-The existing MSSQL and MySQL schema upgraders iterate `DataTableSerializer.GetExpectedSchema()`. They therefore add a missing `RdpClientMode` column automatically; no manual SQL migration is required.
-
-## Explicitly unsupported native combinations
-
-Native launch fails with a clear message rather than ignoring these settings:
-
-- mRemoteNG-managed SSH tunnel — its lifetime is currently coupled to the embedded tab/protocol path;
-- `Force.ViewOnly` — view-only is implemented by filtering input messages in the embedded control;
-- Hyper-V `UseVmId` or Enhanced Session mode — these depend on the embedded RDP/Hyper-V control path;
-- simultaneous Restricted Admin and Remote Credential Guard.
-
-These connections remain usable by selecting `Embedded`.
+The remaining settings are supplied by the temporary `.rdp` file.
 
 ## RD Gateway behavior
 
-A destination credential stored as `TERMSRV/<host>` is not assumed to be a separate RD Gateway credential.
-
-Implemented behavior:
-
+- explicit gateway settings include `gatewayprofileusagemethod:i:1`;
+- password-based gateway credentials use `gatewaycredentialssource:i:0`;
+- smart card uses source `1`;
+- access token uses source `5`;
 - shared destination/gateway credentials set `promptcredentialonce:i:1`;
-- separate gateway credentials are resolved and stored under the gateway target;
-- smart-card and access-token modes do not create password credentials;
-- an access token is passed only through its RDP property;
-- if destination and gateway resolve to the same target but use different credentials, the destination credential is preserved and mstsc is allowed to prompt for the gateway credential.
+- separate credentials are stored under the gateway `TERMSRV` target;
+- stale access-token values are not serialized when another gateway authentication mode is selected;
+- prompt, no-credentials and integrated-security launches omit gateway tokens;
+- if destination and gateway resolve to the same target with different credentials, the destination credential is retained and mstsc can prompt for the gateway credential.
 
-## Lifecycle limitations
+## Persistence
 
-mRemoteNG does not own the native mstsc window and cannot reliably map the bootstrap process lifetime to the actual RDP session lifetime. Therefore native mode does not provide:
+### XML
 
-- an mRemoteNG connection tab;
-- embedded reconnect/status events;
-- reliable session-close tracking;
-- `RDPMinutesToIdleTimeout`/`RDPAlertIdleTimeout` callbacks;
-- `RetryOnFirstConnect` polling after mstsc has started;
-- execution of `PostExtApp` when the native session exits;
-- view-only filtering.
+The optional value is stored as:
 
-These are inherent differences between embedded ActiveX and a separate native process, not hidden fallbacks.
+`RdpClientMode="Embedded|NativeMstsc"`
+
+Changes include:
+
+- model property and enum;
+- XML serialization/deserialization;
+- optional XSD attribute;
+- backward-compatible defaulting;
+- normal clone/copy behavior.
+
+### SQL database mode
+
+`RdpClientMode` is included in:
+
+- the expected `tblCons` DataTable schema;
+- dirty checking;
+- serialization;
+- backward-compatible deserialization.
+
+Existing MSSQL and MySQL schema upgraders consume `DataTableSerializer.GetExpectedSchema()`, so they add a missing column automatically. No manual SQL migration is required.
+
+## Explicitly unsupported combinations
+
+Native launch fails with a clear message instead of silently ignoring these settings:
+
+- mRemoteNG-managed SSH tunnel;
+- View Only;
+- Hyper-V VM ID;
+- Hyper-V Enhanced Session;
+- simultaneous Restricted Admin and Remote Credential Guard.
+
+These connections remain available in `Embedded` mode.
+
+## Lifecycle and audit limitations
+
+mRemoteNG does not own the native mstsc window and cannot reliably map the bootstrap process to the actual RDP session.
+
+Native mode therefore does not provide:
+
+- an mRemoteNG tab;
+- `OpenConnections`/active-session state;
+- embedded connected/disconnected/closed events;
+- a reliable session-close event;
+- established/closed audit events based on the real remote session;
+- `RDPMinutesToIdleTimeout` or `RDPAlertIdleTimeout` callbacks;
+- embedded reconnect and `RetryOnFirstConnect` handling after mstsc starts;
+- `PostExtApp` execution when the external session exits;
+- View Only input filtering.
+
+The launcher logs that mstsc was started, but it must not claim that remote authentication or session establishment succeeded.
 
 ## Unsigned RDP policy compatibility
 
-The generated file cannot safely reuse an existing signature. Enterprise Windows policy can require signed `.rdp` files or warn/block files from unknown publishers. On such managed machines, native launch may be blocked by the local Remote Desktop Client policy even though the generated file is valid.
+Generated files are intentionally unsigned. An existing signature cannot be reused after the payload changes.
 
-Supporting these environments requires a future certificate-selection/signing feature; silently copying an unrelated stored signature would not solve the policy requirement.
+Enterprise policy can warn about or block unsigned `.rdp` files. Supporting environments that require trusted publishers needs a separate certificate-selection/signing feature.
+
+Starting with newer Windows security updates, RDP file warnings and policies can be stricter, so this must be included in managed-device validation.
 
 ## Error handling
 
-Native launch reports actionable errors through `Runtime.MessageCollector`, including:
+Native launch reports failures for:
 
 - missing `mstsc.exe`;
-- empty hostname or invalid port;
-- temporary-file creation failure;
-- Credential Manager Win32 error;
+- missing hostname or invalid port;
+- unsupported native combination;
 - external credential-provider failure;
-- unsupported SSH tunnel, view-only or Hyper-V combination;
-- mutually exclusive security modes;
+- Credential Manager Win32 failure;
+- temporary-file creation failure;
 - process-start failure.
 
-A native-launch failure does not silently open an embedded session. The user can explicitly change the connection mode to `Embedded`.
+A failed native launch does not silently fall back to Embedded mode.
 
-## Security properties
+## Validation
 
-- no password in `.rdp`;
-- no password in command line;
-- no shell invocation;
-- no modification of global `Default.rdp`;
-- unique temporary filenames;
-- password buffer zeroed after `CredWriteW`;
-- credential injection disabled for prompt, RCG, Restricted Admin and no-credentials modes;
-- hostname and username normalized before credential creation;
-- invalid stored RDP signatures are not propagated.
+Automated test sources cover:
 
-## Automated validation
+- backward-compatible `Embedded` defaults;
+- XML/SQL persistence and SQL round trip;
+- address, port, username and resolution mappings;
+- scaling, SmartSize, drive modes and command-line switches;
+- absence of passwords/signatures from generated files;
+- direct/default/provider credential resolution;
+- domain-prefix parsing;
+- shared and separate gateway behavior;
+- correct gateway credential source/profile values;
+- stale and suppressed gateway tokens;
+- CR/LF/NUL directive-injection prevention.
 
-Implemented tests cover:
+Repository `PR_Validation` currently compiles the application for x86, x64 and ARM64, compiles the test/spec projects for x86 and x64, and runs the configured application smoke checks. It does not execute the complete NUnit suite; `dotnet test` remains a separate validation step.
 
-- old connections default to `Embedded`;
-- native mode can be stored in the model;
-- custom address/port and domain-qualified username serialization;
-- resolved credential hints override stored placeholders;
-- destination and gateway passwords never enter the `.rdp` payload;
-- shared gateway credentials and `promptcredentialonce`;
-- stored signature omission;
-- predefined and custom resolution mapping;
-- SmartSize mapping;
-- desktop scale percentages and `Auto` omission;
-- all, custom and disabled drive redirection modes;
-- domain-prefix credential resolution;
-- destination credentials reused for the gateway when configured;
-- `Force.NoCredentials` resolver behavior;
-- native command-line force flags and security switches;
-- SQL expected-schema column;
-- SQL `NativeMstsc` round trip;
-- old SQL schema without the column defaults to `Embedded`.
+Manual validation completed:
 
-Repository `PR_Validation` additionally builds tests/specs for x86 and x64, builds the application for x86, x64 and ARM64, and performs the configured application smoke tests.
+- native mstsc launch from a configured RDP connection;
+- automatic temporary-file generation;
+- automatic credential handoff for the tested connection;
+- no user-managed BAT or `.rdp` file required.
 
-## Manual Windows validation checklist
+Manual scenarios still recommended before merge/release:
 
-- standard hostname and non-default port;
-- domain username, UPN username and local account;
-- direct, linked, inherited and external-provider credentials;
-- saved credential and prompt-only mode;
+- non-default port and IPv6;
+- domain, UPN and local accounts;
+- configured default password/domain fallback;
+- each external credential provider used in production;
 - Restricted Admin and Remote Credential Guard;
-- fullscreen and mixed-DPI multimonitor behavior;
-- local fixed, all and custom drives;
-- clipboard, printers, smart cards, microphone and WebAuthn;
-- shared and separate RD Gateway authentication;
+- fullscreen and mixed-DPI multimonitor;
+- all/local/custom drives and device redirects;
+- separate RD Gateway credentials and Access Token mode;
 - RemoteApp/start program;
-- parallel native sessions;
-- forced mRemoteNG termination followed by stale-file cleanup;
-- expected rejection of SSH-tunnel, view-only and Hyper-V enhanced combinations;
-- behavior on a machine with a policy that blocks unsigned `.rdp` files.
+- parallel native launches;
+- crash followed by stale-file cleanup;
+- unsigned-RDP enterprise policy behavior.
