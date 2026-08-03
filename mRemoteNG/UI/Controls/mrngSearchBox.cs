@@ -58,7 +58,7 @@ namespace mRemoteNG.UI.Controls
         {
             if (!_settingDefaultText)
             {
-                _showDefaultText = string.IsNullOrEmpty(Text);
+                _showDefaultText = string.IsNullOrEmpty(Text) || Text == Language.SearchPrompt;
             }
 
             _pbClear.Visible = !_showDefaultText && TextLength > 0;
