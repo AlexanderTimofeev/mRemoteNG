@@ -275,6 +275,8 @@ namespace mRemoteNG.UI.Window
                 {
                     case Keys.Escape:
                         e.Handled = true;
+                        txtSearch.Text = string.Empty;
+                        ConnectionTree.RemoveFilter();
                         ConnectionTree.Focus();
                         break;
                     case Keys.Up:
@@ -309,20 +311,26 @@ namespace mRemoteNG.UI.Window
 
         private void ApplyFiltering()
         {
+            string searchText = txtSearch.Text;
+            bool isSearchPrompt = string.Equals(searchText, Language.SearchPrompt, StringComparison.CurrentCulture);
+            bool hasSearchText = !string.IsNullOrWhiteSpace(searchText) && !isSearchPrompt;
+
             if (Settings.Default.UseFilterSearch)
             {
-                if (txtSearch.Text == "" || txtSearch.Text == Language.SearchPrompt)
+                if (!hasSearchText)
                 {
                     ConnectionTree.RemoveFilter();
                     return;
                 }
 
-                ConnectionTree.ApplyFilter(txtSearch.Text);
+                ConnectionTree.ApplyFilter(searchText);
             }
             else
             {
-                if (txtSearch.Text == "") return;
-                ConnectionTree.NodeSearcher?.SearchByName(txtSearch.Text);
+                if (!hasSearchText)
+                    return;
+
+                ConnectionTree.NodeSearcher?.SearchByName(searchText);
                 JumpToNode(ConnectionTree.NodeSearcher?.CurrentMatch);
             }
         }
