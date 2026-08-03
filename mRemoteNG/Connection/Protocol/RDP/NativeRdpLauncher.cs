@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Windows.Forms;
 using mRemoteNG.App;
 using mRemoteNG.Messages;
 
@@ -14,6 +16,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private const string SigningThumbprintEnvironmentVariable = "MREMOTENG_RDP_SIGN_CERT_THUMBPRINT";
         private const string SigningThumbprintFileName = "native-rdp-signing-thumbprint.txt";
         private static readonly TimeSpan SigningTimeout = TimeSpan.FromSeconds(30);
+        private static int _signingFailureNotificationShown;
 
         private readonly TemporaryRdpFileStore _fileStore;
 
@@ -183,11 +186,35 @@ namespace mRemoteNG.Connection.Protocol.RDP
             }
             catch (Exception ex)
             {
-                Runtime.MessageCollector.AddMessage(
-                    MessageClass.WarningMsg,
-                    $"Unable to sign the temporary RDP file. It will be launched unsigned. {ex.Message}");
+                ReportSigningFailure(ex);
                 return false;
             }
+        }
+
+        private static void ReportSigningFailure(Exception exception)
+        {
+            const string logMessage =
+                "Unable to sign the temporary RDP file. mstsc will continue with an unsigned file.";
+
+            // Keep full diagnostic details for every failed signing attempt.
+            Runtime.MessageCollector.AddExceptionStackTrace(logMessage, exception);
+
+            // A persistent certificate problem would otherwise show the same modal warning for every connection.
+            // Notify the user once per application session, while continuing to log every failure.
+            if (Interlocked.Exchange(ref _signingFailureNotificationShown, 1) != 0)
+                return;
+
+            string notification =
+                "The temporary RDP file could not be signed.\r\n\r\n" +
+                "mstsc will open it without a signature, so Windows may display its security confirmation.\r\n" +
+                "The complete error was written to the mRemoteNG log.\r\n\r\n" +
+                exception.Message;
+
+            MessageBox.Show(
+                notification,
+                "mRemoteNG - RDP file signing failed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         private static void SignRdpFile(string rdpPath, string thumbprint)
