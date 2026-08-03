@@ -38,11 +38,16 @@ namespace mRemoteNG.Connection.Protocol.RDP
                     force.HasFlag(ConnectionInfo.Force.NoCredentials) ||
                     connectionInfo.AlwaysPromptForCredentials;
                 bool prompt = !integratedSecurity && suppressCredentialInjection;
+                bool gatewayUsesConnectionCredentials =
+                    HasConfiguredGateway(connectionInfo) &&
+                    connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.Yes;
+                bool shouldResolveConnectionCredentials =
+                    !suppressCredentialInjection &&
+                    (!integratedSecurity || (connectionInfo.UseRestrictedAdmin && gatewayUsesConnectionCredentials));
 
-                RdpResolvedCredentials resolvedConnectionCredentials =
-                    !suppressCredentialInjection && !connectionInfo.UseRCG
-                        ? RdpCredentialResolver.ResolveDestination(connectionInfo, force)
-                        : RdpResolvedCredentials.Empty;
+                RdpResolvedCredentials resolvedConnectionCredentials = shouldResolveConnectionCredentials
+                    ? RdpCredentialResolver.ResolveDestination(connectionInfo, force)
+                    : RdpResolvedCredentials.Empty;
 
                 RdpResolvedCredentials destinationCredentials = integratedSecurity
                     ? RdpResolvedCredentials.Empty
@@ -124,6 +129,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return $"TERMSRV/{host}";
         }
 
+        private static bool HasConfiguredGateway(ConnectionInfo connectionInfo) =>
+            connectionInfo.RDGatewayUsageMethod != RDGatewayUsageMethod.Never &&
+            !string.IsNullOrWhiteSpace(connectionInfo.RDGatewayHostname);
+
         private static void WriteCredentialIfAvailable(
             string? hostname,
             RdpResolvedCredentials credentials)
@@ -173,7 +182,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return new RdpResolvedCredentials(normalizedUsername, string.Empty, normalizedDomain);
         }
 
-        private static void Validate(ConnectionInfo connectionInfo, ConnectionInfo.Force force)
+        internal static void Validate(ConnectionInfo connectionInfo, ConnectionInfo.Force force)
         {
             if (string.IsNullOrWhiteSpace(connectionInfo.Hostname))
                 throw new InvalidOperationException("A hostname is required for native RDP launch.");
@@ -181,9 +190,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new InvalidOperationException($"The RDP port '{connectionInfo.Port}' is outside the valid range.");
             if (connectionInfo.UseRestrictedAdmin && connectionInfo.UseRCG)
                 throw new InvalidOperationException("Restricted Admin and Remote Credential Guard cannot be enabled at the same time.");
-            if (connectionInfo.UseRCG &&
-                connectionInfo.RDGatewayUsageMethod != RDGatewayUsageMethod.Never &&
-                !string.IsNullOrWhiteSpace(connectionInfo.RDGatewayHostname))
+            if (connectionInfo.UseRCG && HasConfiguredGateway(connectionInfo))
             {
                 throw new NotSupportedException(
                     "Remote Credential Guard is supported only for direct RDP connections and cannot be used through RD Gateway.");
