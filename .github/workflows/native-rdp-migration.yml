@@ -20,4 +20,4 @@ jobs:
       - name: Apply integration changes
         shell: bash
         run: |
-          bash .github/scripts/native-rdp-migrate.sh
+          bash .github/scripts/native-rdp-migrate-v2.sh
