@@ -96,7 +96,7 @@ function Has-Cert([string]$Store, [string]$Thumbprint) {
 }
 
 function Ensure-TrustedStore($Cert, [string]$StoreName) {
-    if (Has-Cert $StoreName $Cert.Thumbprint) { return }
+    if (Has-Cert $StoreName ($Cert.Thumbprint)) { return }
     $public = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
         $Cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
     )
@@ -193,8 +193,8 @@ function Existing-Publishers {
 }
 
 function Configure($Cert, $User) {
-    $sha1 = Normalize-Hex $Cert.Thumbprint
-    $sha256 = Normalize-Hex $Cert.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    $sha1 = Normalize-Hex ($Cert.Thumbprint)
+    $sha256 = Normalize-Hex ($Cert.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256))
     if ($sha1.Length -ne 40 -or $sha256.Length -ne 64) { throw 'Unexpected certificate hash length.' }
 
     Ensure-TrustedStore $Cert 'Root'
@@ -234,8 +234,8 @@ function Validate($User) {
     Result 'Certificate in LocalMachine\My' ($null -ne $cert) $(if ($cert) { $cert.Subject } else { 'Not found' })
     if ($null -eq $cert) { return $false }
 
-    $sha1 = Normalize-Hex $cert.Thumbprint
-    $sha256 = Normalize-Hex $cert.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    $sha1 = Normalize-Hex ($cert.Thumbprint)
+    $sha256 = Normalize-Hex ($cert.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256))
     $key = Key-Path $cert
     Result 'Private key available' $cert.HasPrivateKey "HasPrivateKey=$($cert.HasPrivateKey)"
     Result 'Certificate valid' ($cert.NotBefore -le (Get-Date) -and $cert.NotAfter -gt (Get-Date)) "$($cert.NotBefore) - $($cert.NotAfter)"
