@@ -10,6 +10,9 @@ on:
 permissions:
   contents: write
 
+env:
+  VALIDATION_REVISION: branch-restored-1
+
 jobs:
   validate:
     runs-on: windows-latest
@@ -44,7 +47,8 @@ jobs:
           @(
             "Native RDP migration validation",
             "UTC: $([DateTime]::UtcNow.ToString('O'))",
-            "HEAD: $(git rev-parse HEAD)"
+            "HEAD: $(git rev-parse HEAD)",
+            "REVISION: $env:VALIDATION_REVISION"
           ) | Set-Content $report -Encoding utf8NoBOM
 
           $restoreOutput = & dotnet restore mRemoteNG.sln 2>&1
