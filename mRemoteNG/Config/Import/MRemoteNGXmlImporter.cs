@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Linq;
 using System.Runtime.Versioning;
 using mRemoteNG.App;
@@ -28,7 +28,7 @@ namespace mRemoteNG.Config.Import
 
             FileDataProvider dataProvider = new(fileName);
             string xmlString = dataProvider.Load();
-            XmlConnectionsDeserializer xmlConnectionsDeserializer = new();
+            NativeRdpModeXmlDeserializer xmlConnectionsDeserializer = new();
             Tree.ConnectionTreeModel connectionTreeModel = xmlConnectionsDeserializer.Deserialize(xmlString, true);
 
             ContainerInfo rootImportContainer = new() { Name = Path.GetFileNameWithoutExtension(fileName)};
