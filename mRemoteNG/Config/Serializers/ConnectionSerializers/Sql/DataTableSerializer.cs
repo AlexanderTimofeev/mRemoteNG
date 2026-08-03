@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -218,6 +218,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataTable.Columns.Add("RDPAuthenticationLevel", typeof(string));
             dataTable.Columns.Add("RDPMinutesToIdleTimeout", typeof(int));
             dataTable.Columns.Add("RdpVersion", typeof(string));
+            dataTable.Columns.Add("RdpClientMode", typeof(string));
             dataTable.Columns.Add("RedirectAudioCapture", typeof(bool));
             dataTable.Columns.Add("RedirectClipboard", typeof(bool));
             dataTable.Columns.Add("RedirectDiskDrives", typeof(string));
@@ -332,6 +333,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             isFieldNotChange = isFieldNotChange && dataRow["RDPAuthenticationLevel"].Equals(connectionInfo.RDPAuthenticationLevel.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["RDPMinutesToIdleTimeout"].Equals(connectionInfo.RDPMinutesToIdleTimeout);
             isFieldNotChange = isFieldNotChange && dataRow["RdpVersion"].Equals(connectionInfo.RdpVersion.ToString());
+            isFieldNotChange = isFieldNotChange && dataRow["RdpClientMode"].Equals(connectionInfo.RdpClientMode.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["RedirectAudioCapture"].Equals(connectionInfo.RedirectAudioCapture);
             isFieldNotChange = isFieldNotChange && dataRow["RedirectClipboard"].Equals(connectionInfo.RedirectClipboard);
             isFieldNotChange = isFieldNotChange && dataRow["RedirectDiskDrives"].Equals(connectionInfo.RedirectDiskDrives.ToString());
@@ -591,6 +593,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataRow["RDPAuthenticationLevel"] = connectionInfo.RDPAuthenticationLevel;
             dataRow["RDPMinutesToIdleTimeout"] = connectionInfo.RDPMinutesToIdleTimeout;
             dataRow["RdpVersion"] = connectionInfo.RdpVersion;
+            dataRow["RdpClientMode"] = connectionInfo.RdpClientMode;
             dataRow["RedirectAudioCapture"] = connectionInfo.RedirectAudioCapture;
             dataRow["RedirectClipboard"] = connectionInfo.RedirectClipboard;
             dataRow["RedirectDiskDrives"] = connectionInfo.RedirectDiskDrives;

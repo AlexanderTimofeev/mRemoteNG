@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Linq;
 using System.Windows.Forms;
@@ -950,7 +950,7 @@ namespace mRemoteNG.UI.Controls
 
             if (confirm != DialogResult.Yes) return;
 
-            ClearCachedCredentialsResult outcome = RdpCredentialCacheCleaner.ClearCachedCredentials(hostname);
+            ClearCachedCredentialsResult outcome = RdpCredentialCacheCleaner.ClearCachedCredentials(selected);
             switch (outcome)
             {
                 case ClearCachedCredentialsResult.Deleted:
