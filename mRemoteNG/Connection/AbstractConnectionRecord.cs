@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using mRemoteNG.Connection.Protocol;
@@ -46,7 +46,6 @@ namespace mRemoteNG.Connection
         private string _sshTunnelConnectionName = "";
         private ProtocolType _protocol;
         private RdpVersion _rdpProtocolVersion = RdpVersion.Rdc10;
-        private RdpClientMode _rdpClientMode;
         private string _extApp;
         private int _port;
         private string _sshOptions = "";
@@ -390,17 +389,6 @@ namespace mRemoteNG.Connection
         {
             get => GetPropertyValue("RdpVersion", _rdpProtocolVersion);
             set => SetField(ref _rdpProtocolVersion, value, nameof(RdpVersion));
-        }
-
-        [LocalizedAttributes.LocalizedCategory(nameof(Language.Protocol), 3),
-         DisplayName("RDP Client"),
-         Description("Choose whether RDP opens inside mRemoteNG or in the native Windows mstsc.exe client."),
-         TypeConverter(typeof(MiscTools.EnumTypeConverter)),
-         AttributeUsedInProtocol(ProtocolType.RDP)]
-        public virtual RdpClientMode RdpClientMode
-        {
-            get => _rdpClientMode;
-            set => SetField(ref _rdpClientMode, value, nameof(RdpClientMode));
         }
 
         [LocalizedAttributes.LocalizedCategory(nameof(Language.Protocol), 3),
