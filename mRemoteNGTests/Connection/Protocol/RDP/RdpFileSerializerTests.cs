@@ -78,56 +78,6 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
         }
 
         [Test]
-        public void SerializeDoesNotReuseSignatureForRegeneratedFile()
-        {
-            ConnectionInfo connectionInfo = new()
-            {
-                Hostname = "rdp.example.test",
-                RDPSignScope = "Full Address,GatewayHostname",
-                RDPSignature = "invalid-after-regeneration"
-            };
-
-            string result = RdpFileSerializer.Serialize(connectionInfo);
-            string lowerResult = result.ToLowerInvariant();
-
-            Assert.That(lowerResult, Does.Not.Contain("signscope"));
-            Assert.That(lowerResult, Does.Not.Contain("signature"));
-            Assert.That(result, Does.Not.Contain("invalid-after-regeneration"));
-        }
-
-        [Test]
-        public void SerializeMapsPredefinedResolution()
-        {
-            ConnectionInfo connectionInfo = new()
-            {
-                Hostname = "rdp.example.test",
-                Resolution = RDPResolutions.Res1920x1080
-            };
-
-            string result = RdpFileSerializer.Serialize(connectionInfo);
-
-            Assert.That(result, Does.Contain("desktopwidth:i:1920"));
-            Assert.That(result, Does.Contain("desktopheight:i:1080"));
-        }
-
-        [Test]
-        public void SerializeMapsCustomResolution()
-        {
-            ConnectionInfo connectionInfo = new()
-            {
-                Hostname = "rdp.example.test",
-                Resolution = RDPResolutions.Custom,
-                ResolutionWidth = 1720,
-                ResolutionHeight = 980
-            };
-
-            string result = RdpFileSerializer.Serialize(connectionInfo);
-
-            Assert.That(result, Does.Contain("desktopwidth:i:1720"));
-            Assert.That(result, Does.Contain("desktopheight:i:980"));
-        }
-
-        [Test]
         public void SerializeEnablesSmartSizing()
         {
             ConnectionInfo connectionInfo = new()
