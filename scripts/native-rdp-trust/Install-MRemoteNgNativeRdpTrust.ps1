@@ -97,10 +97,16 @@ function Has-Cert([string]$Store, [string]$Thumbprint) {
 
 function Ensure-TrustedStore($Cert, [string]$StoreName) {
     if (Has-Cert $StoreName ($Cert.Thumbprint)) { return }
-    $public = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-        $Cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+
+    # New-Object X509Certificate2($byteArray) is unsafe in Windows PowerShell 5.1:
+    # it expands every byte into a separate constructor argument. Create an empty
+    # certificate first and import the byte array through the one-argument method.
+    [byte[]]$publicBytes = $Cert.Export(
+        [System.Security.Cryptography.X509Certificates.X509ContentType]::Cert
     )
+    $public = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
     try {
+        $public.Import($publicBytes)
         $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
             $StoreName,
             [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
