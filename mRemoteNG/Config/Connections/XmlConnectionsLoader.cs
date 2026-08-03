@@ -1,4 +1,4 @@
-﻿using mRemoteNG.Config.DataProviders;
+using mRemoteNG.Config.DataProviders;
 using mRemoteNG.Tools;
 using mRemoteNG.Tree;
 using System;
@@ -29,7 +29,7 @@ namespace mRemoteNG.Config.Connections
         {
             FileDataProvider dataProvider = new(_connectionFilePath);
             string xmlString = dataProvider.Load();
-            XmlConnectionsDeserializer deserializer = new(PromptForPassword);
+            NativeRdpModeXmlDeserializer deserializer = new(PromptForPassword);
             return deserializer.Deserialize(xmlString);
         }
 
