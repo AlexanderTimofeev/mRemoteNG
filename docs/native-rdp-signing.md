@@ -1,12 +1,12 @@
 # Signing temporary RDP files
 
-Native `mstsc` mode generates a new temporary `.rdp` file for every connection launch. Windows can display a security confirmation dialog for unsigned files, especially when clipboard, drives, printers, smart cards, audio, or other device redirection is enabled.
+Native `mstsc` mode generates a temporary `.rdp` file for every connection launch. Windows can display a security confirmation dialog for unsigned files, especially when clipboard, drives, printers, smart cards, audio, or other device redirection is enabled.
 
-mRemoteNG can sign each generated file with `%SystemRoot%\System32\rdpsign.exe` before starting `mstsc.exe`.
+mRemoteNG signs generated files in-process by using the configured Windows certificate and the standard CMS/PKCS#7 signature format understood by `mstsc.exe`. The normal signing path does not invoke `rdpsign.exe`.
 
 ## Required configuration value
 
-The configured value must be the **64-character SHA-256 certificate hash** returned by:
+The configured value must be the 64-character SHA-256 certificate hash returned by:
 
 ```powershell
 $certificate.GetCertHashString(
@@ -20,13 +20,13 @@ Do not use either of these values:
 $certificate.Thumbprint
 ```
 
-That is normally the 40-character SHA-1 thumbprint. It is retained only in diagnostics and is not used as the `/sha256` signing value.
+That is normally the 40-character SHA-1 thumbprint.
 
 ```powershell
 (Get-FileHash $cerPath -Algorithm SHA256).Hash
 ```
 
-That is the hash of the exported `.cer` file, not the certificate hash expected by `rdpsign.exe`.
+That is the hash of the exported `.cer` file rather than the certificate itself.
 
 ## Configuration sources
 
@@ -131,40 +131,31 @@ For every native launch, mRemoteNG:
    %LOCALAPPDATA%\mRemoteNG\Temp\Rdp
    ```
 
-2. Reads and normalizes the configured SHA-256 hash.
-3. Requires exactly 64 hexadecimal characters.
-4. Finds the matching certificate in `CurrentUser\My` or `LocalMachine\My`.
-5. Checks that the certificate has a private key and is currently valid.
-6. First runs `rdpsign.exe` directly from the .NET process:
+2. Reads and normalizes the configured SHA-256 certificate hash.
+3. Finds the matching certificate in `CurrentUser\My` or `LocalMachine\My`.
+4. Checks that the certificate has a private key and is currently valid.
+5. Selects the security-sensitive RDP settings and creates `signscope:s:`.
+6. Creates a detached SHA-256 CMS/PKCS#7 signature with the certificate private key.
+7. Adds `signature:s:` to the generated RDP file.
+8. Starts `mstsc.exe` with the signed file.
 
-   ```text
-   rdpsign.exe /sha256 <64-character-hash> /v <file.rdp>
-   ```
-
-7. If the direct process returns a non-zero exit code, retries the same command through hidden Windows PowerShell using an encoded command. This matches the interactive PowerShell invocation used during manual verification while avoiding shell interpolation of the certificate hash or RDP path.
-8. Starts `mstsc.exe`.
+The signature implementation follows the RDP signature envelope reverse engineered by the open-source `nfedera/rdpsign` project and later .NET implementations of the same format.
 
 When signing fails:
 
 - `mstsc` still starts with the unsigned file;
 - a warning is shown once per mRemoteNG application session;
-- every failure is logged with both decimal and hexadecimal exit codes, the file path, certificate hashes, the generated PowerShell command, and complete process output.
+- every failure is written to the dedicated signing diagnostics log.
 
-When the PowerShell-hosted retry succeeds, mRemoteNG logs a warning explaining that the compatibility launch path was used.
+A successful launch is recorded in the normal mRemoteNG log as:
 
-## Verify manually
-
-Read the configured value:
-
-```powershell
-$sha256 = Get-Content `
-    "$env:LOCALAPPDATA\mRemoteNG\native-rdp-signing-thumbprint.txt"
-
-$sha256
-$sha256.Length
+```text
+Launched mstsc.exe for RDP connection '<name>' using a signed RDP file.
 ```
 
-Find a generated file and test signing:
+## Verify the generated file
+
+After starting a native connection, inspect the newest temporary RDP file before it is deleted:
 
 ```powershell
 $rdp = Get-ChildItem `
@@ -173,29 +164,14 @@ $rdp = Get-ChildItem `
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
-& "$env:SystemRoot\System32\rdpsign.exe" `
-    /sha256 $sha256 `
-    /v `
-    $rdp.FullName
-
-$LASTEXITCODE
+Select-String `
+    -Path $rdp.FullName `
+    -Pattern '^signscope:s:','^signature:s:'
 ```
 
-Expected output includes:
-
-```text
-All rdp file(s) have been succesfully signed.
-```
-
-Expected exit code:
-
-```text
-0
-```
+Both lines should be present.
 
 ## Replace an old 40-character configured value
-
-The configuration file must contain the 64-character SHA-256 hash:
 
 ```powershell
 $cert = Get-ChildItem Cert:\CurrentUser\My |
@@ -227,6 +203,7 @@ Remove-Item `
     "User")
 ```
 
-## Microsoft reference
+## References
 
-- `rdpsign`: <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/rdpsign>
+- Microsoft `rdpsign` command documentation: <https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/rdpsign>
+- Reverse-engineered RDP signature format: <https://github.com/nfedera/rdpsign>
