@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -218,6 +218,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataTable.Columns.Add("RDPAuthenticationLevel", typeof(string));
             dataTable.Columns.Add("RDPMinutesToIdleTimeout", typeof(int));
             dataTable.Columns.Add("RdpVersion", typeof(string));
+            dataTable.Columns.Add("RdpClientMode", typeof(string));
             dataTable.Columns.Add("RedirectAudioCapture", typeof(bool));
             dataTable.Columns.Add("RedirectClipboard", typeof(bool));
             dataTable.Columns.Add("RedirectDiskDrives", typeof(string));
@@ -298,7 +299,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             isFieldNotChange = isFieldNotChange && dataRow["CacheBitmaps"].Equals(connectionInfo.CacheBitmaps);
             isFieldNotChange = isFieldNotChange && dataRow["Colors"].Equals(connectionInfo.Colors.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["ConnectToConsole"].Equals(connectionInfo.UseConsoleSession);
-            isFieldNotChange = isFieldNotChange && dataRow["Connected"].Equals(false); // TODO: this column can eventually be removed. we now save this property locally
+            isFieldNotChange = isFieldNotChange && dataRow["Connected"].Equals(false);
             isFieldNotChange = isFieldNotChange && dataRow["DisableCursorBlinking"].Equals(connectionInfo.DisableCursorBlinking);
             isFieldNotChange = isFieldNotChange && dataRow["DisableCursorShadow"].Equals(connectionInfo.DisableCursorShadow);
             isFieldNotChange = isFieldNotChange && dataRow["DisableFullWindowDrag"].Equals(connectionInfo.DisableFullWindowDrag);
@@ -332,6 +333,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             isFieldNotChange = isFieldNotChange && dataRow["RDPAuthenticationLevel"].Equals(connectionInfo.RDPAuthenticationLevel.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["RDPMinutesToIdleTimeout"].Equals(connectionInfo.RDPMinutesToIdleTimeout);
             isFieldNotChange = isFieldNotChange && dataRow["RdpVersion"].Equals(connectionInfo.RdpVersion.ToString());
+            isFieldNotChange = isFieldNotChange && dataRow["RdpClientMode"].Equals(connectionInfo.RdpClientMode.ToString());
             isFieldNotChange = isFieldNotChange && dataRow["RedirectAudioCapture"].Equals(connectionInfo.RedirectAudioCapture);
             isFieldNotChange = isFieldNotChange && dataRow["RedirectClipboard"].Equals(connectionInfo.RedirectClipboard);
             isFieldNotChange = isFieldNotChange && dataRow["RedirectDiskDrives"].Equals(connectionInfo.RedirectDiskDrives.ToString());
@@ -514,9 +516,6 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
                     dataRow["InheritVNCViewOnly"].Equals(false);
             }
 
-            //bool pwd = dataRow["Password"].Equals(_saveFilter.SavePassword ? _cryptographyProvider.Encrypt(connectionInfo.Password?.ConvertToUnsecureString(), _encryptionKey) : "") &&
-            //          dataRow["VNCProxyPassword"].Equals(_cryptographyProvider.Encrypt(connectionInfo.VNCProxyPassword, _encryptionKey)) &&
-            //          dataRow["RDGatewayPassword"].Equals(_cryptographyProvider.Encrypt(connectionInfo.RDGatewayPassword, _encryptionKey));
             bool pwd = dataRow["Password"].Equals(_saveFilter.SavePassword ? _cryptographyProvider.Encrypt(connectionInfo.Password, _encryptionKey) : "") &&
                       dataRow["VNCProxyPassword"].Equals(_cryptographyProvider.Encrypt(connectionInfo.VNCProxyPassword, _encryptionKey)) &&
                       dataRow["RDGatewayPassword"].Equals(_cryptographyProvider.Encrypt(connectionInfo.RDGatewayPassword, _encryptionKey));
@@ -549,7 +548,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataRow["Colors"] = connectionInfo.Colors;
             dataRow["ConnectToConsole"] = connectionInfo.UseConsoleSession;
             dataRow["Connected"] = false;
-            dataRow["Description"] = connectionInfo.Description; // TODO: this column can eventually be removed. we now save this property locally
+            dataRow["Description"] = connectionInfo.Description;
             dataRow["DisableCursorBlinking"] = connectionInfo.DisableCursorBlinking;
             dataRow["DisableCursorShadow"] = connectionInfo.DisableCursorShadow;
             dataRow["DisableFullWindowDrag"] = connectionInfo.DisableFullWindowDrag;
@@ -570,10 +569,8 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataRow["MacAddress"] = connectionInfo.MacAddress;
             dataRow["Name"] = connectionInfo.Name;
             dataRow["OpeningCommand"] = connectionInfo.OpeningCommand;
-            // dataRow["OpeningCommand"] = connectionInfo.OpeningCommand; dublicate?
             dataRow["Panel"] = connectionInfo.Panel;
             dataRow["ParentID"] = connectionInfo.Parent?.ConstantID ?? "";
-            //dataRow["Password"] = _saveFilter.SavePassword ? _cryptographyProvider.Encrypt(connectionInfo.Password?.ConvertToUnsecureString(), _encryptionKey) : "";
             dataRow["Password"] = _saveFilter.SavePassword ? _cryptographyProvider.Encrypt(connectionInfo.Password, _encryptionKey) : "";
             dataRow["Port"] = connectionInfo.Port;
             dataRow["PositionID"] = _currentNodeIndex;
@@ -591,6 +588,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataRow["RDPAuthenticationLevel"] = connectionInfo.RDPAuthenticationLevel;
             dataRow["RDPMinutesToIdleTimeout"] = connectionInfo.RDPMinutesToIdleTimeout;
             dataRow["RdpVersion"] = connectionInfo.RdpVersion;
+            dataRow["RdpClientMode"] = connectionInfo.RdpClientMode;
             dataRow["RedirectAudioCapture"] = connectionInfo.RedirectAudioCapture;
             dataRow["RedirectClipboard"] = connectionInfo.RedirectClipboard;
             dataRow["RedirectDiskDrives"] = connectionInfo.RedirectDiskDrives;
@@ -626,7 +624,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             dataRow["VNCProxyType"] = connectionInfo.VNCProxyType;
             dataRow["VNCProxyUsername"] = connectionInfo.VNCProxyUsername;
             dataRow["VNCSmartSizeMode"] = connectionInfo.VNCSmartSizeMode;
-            dataRow["VNCViewOnly"] = connectionInfo.VNCViewOnly; // TODO: this column can eventually be removed. we now save this property locally
+            dataRow["VNCViewOnly"] = connectionInfo.VNCViewOnly;
             dataRow["VmId"] = connectionInfo.VmId;
             dataRow["UserViaAPI"] = connectionInfo.UserViaAPI;
 
