@@ -63,13 +63,13 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddInt(lines, "audiomode", AudioMode(connectionInfo.RedirectSound.ToString()));
             AddInt(lines, "audioqualitymode", SoundQuality(connectionInfo.SoundQuality.ToString()));
             AddInt(lines, "audiocapturemode", Bool(connectionInfo.RedirectAudioCapture));
-            AddInt(lines, "redirectwebauthn", Bool(connectionInfo.RedirectWebAuthn));
+            AddOptionalBool(lines, "redirectwebauthn", connectionInfo, "RedirectWebAuthn");
 
             AddInt(lines, "authentication level", Convert.ToInt32(connectionInfo.RDPAuthenticationLevel, CultureInfo.InvariantCulture));
             AddInt(lines, "enablecredsspsupport", Bool(connectionInfo.UseCredSsp));
-            AddInt(lines, "prompt for credentials", Bool(connectionInfo.AlwaysPromptForCredentials));
+            AddOptionalBool(lines, "prompt for credentials", connectionInfo, "AlwaysPromptForCredentials");
             AddInt(lines, "use redirection server name", Bool(connectionInfo.UseRedirectionServerName));
-            AddInt(lines, "enablerdsaadauth", Bool(connectionInfo.EnableRdsAadAuth));
+            AddOptionalBool(lines, "enablerdsaadauth", connectionInfo, "EnableRdsAadAuth");
             AddString(lines, "loadbalanceinfo", connectionInfo.LoadBalanceInfo);
 
             AddGateway(lines, connectionInfo, gatewayCredentials, includeGatewayAccessToken);
@@ -78,8 +78,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddString(lines, "shell working directory", connectionInfo.RDPStartProgramWorkDir);
             AddRemoteApp(lines, connectionInfo);
 
-            // A stored signature applies to the original RDP payload. Reusing it after regenerating
-            // the file would produce an invalid and misleading signature, so native files are unsigned.
             return string.Join("\r\n", lines) + "\r\n";
         }
 
@@ -112,43 +110,58 @@ namespace mRemoteNG.Connection.Protocol.RDP
             return $"{normalizedDomain}\\{normalizedUsername}";
         }
 
+        internal static (string Username, string Domain) ParseDomainFromUsername(string? value)
+        {
+            string username = value?.Trim() ?? string.Empty;
+            int separator = username.IndexOf('\\');
+            if (separator <= 0 || separator >= username.Length - 1)
+                return (username, string.Empty);
+
+            return (username[(separator + 1)..], username[..separator]);
+        }
+
         private static void AddDisplaySettings(ICollection<string> lines, ConnectionInfo connectionInfo)
         {
-            AddInt(lines, "screen mode id", connectionInfo.Resolution == RDPResolutions.Fullscreen ? 2 : 1);
-            AddInt(lines, "use multimon", Bool(connectionInfo.RDPUseMultimon));
+            string resolution = connectionInfo.Resolution.ToString();
+            AddInt(lines, "screen mode id", string.Equals(resolution, "Fullscreen", StringComparison.OrdinalIgnoreCase) ? 2 : 1);
+            AddOptionalBool(lines, "use multimon", connectionInfo, "RDPUseMultimon");
             AddInt(lines, "session bpp", ColorDepth(connectionInfo.Colors.ToString()));
 
-            bool smartSizing = connectionInfo.Resolution is RDPResolutions.SmartSize or RDPResolutions.SmartSizeAspect ||
-                               connectionInfo.RDPSizingMode is RDPSizingMode.SmartSize or RDPSizingMode.SmartSizeAspect;
+            bool smartSizing = resolution.StartsWith("SmartSize", StringComparison.OrdinalIgnoreCase) ||
+                               GetOptionalString(connectionInfo, "RDPSizingMode").StartsWith("SmartSize", StringComparison.OrdinalIgnoreCase);
             AddInt(lines, "smart sizing", Bool(smartSizing));
             AddInt(lines, "dynamic resolution", Bool(connectionInfo.AutomaticResize));
 
-            (int width, int height) = ResolveDesktopSize(connectionInfo);
+            (int width, int height) = ResolveDesktopSize(connectionInfo, resolution);
             if (width > 0)
                 AddInt(lines, "desktopwidth", width);
             if (height > 0)
                 AddInt(lines, "desktopheight", height);
 
-            int? desktopScaleFactor = DesktopScaleFactor(connectionInfo.DesktopScaleFactor.ToString());
+            int? desktopScaleFactor = DesktopScaleFactor(GetOptionalString(connectionInfo, "DesktopScaleFactor"));
             if (desktopScaleFactor.HasValue)
                 AddInt(lines, "desktopscalefactor", desktopScaleFactor.Value);
         }
 
-        private static (int Width, int Height) ResolveDesktopSize(ConnectionInfo connectionInfo)
+        private static (int Width, int Height) ResolveDesktopSize(ConnectionInfo connectionInfo, string resolution)
         {
-            if (connectionInfo.Resolution == RDPResolutions.Custom)
-                return (connectionInfo.ResolutionWidth, connectionInfo.ResolutionHeight);
-
-            string name = connectionInfo.Resolution.ToString();
-            if (name.StartsWith("Res", StringComparison.Ordinal))
+            if (string.Equals(resolution, "Custom", StringComparison.OrdinalIgnoreCase))
             {
-                string[] parts = name[3..].Split('x', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2 &&
-                    int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int width) &&
-                    int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int height))
-                {
-                    return (width, height);
-                }
+                return (
+                    GetOptionalInt(connectionInfo, "ResolutionWidth"),
+                    GetOptionalInt(connectionInfo, "ResolutionHeight"));
+            }
+
+            string name = resolution;
+            if (name.StartsWith("Res", StringComparison.Ordinal))
+                name = name[3..];
+
+            string[] parts = name.Split('x', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 2 &&
+                int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int width) &&
+                int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int height))
+            {
+                return (width, height);
             }
 
             return (0, 0);
@@ -222,11 +235,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddInt(lines, "gatewaycredentialssource", sourceValue);
             AddInt(lines, "promptcredentialonce", Bool(connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.Yes));
             AddString(lines, "gatewayusername", BuildUsername(gatewayCredentials.Username, gatewayCredentials.Domain));
-            if (includeGatewayAccessToken &&
-                connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.AccessToken)
-            {
-                AddString(lines, "gatewayaccesstoken", connectionInfo.RDGatewayAccessToken);
-            }
+            if (includeGatewayAccessToken && credentialSource == "AccessToken")
+                AddString(lines, "gatewayaccesstoken", GetOptionalString(connectionInfo, "RDGatewayAccessToken"));
         }
 
         private static void AddRemoteApp(ICollection<string> lines, ConnectionInfo connectionInfo)
@@ -240,10 +250,25 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddString(lines, "remoteapplicationcmdline", GetOptionalString(connectionInfo, "RDPRemoteAppCmdLine"));
         }
 
-        private static string GetOptionalString(ConnectionInfo connectionInfo, string propertyName)
+        internal static bool GetOptionalBool(ConnectionInfo connectionInfo, string propertyName)
+        {
+            object? value = GetOptionalValue(connectionInfo, propertyName);
+            return value is bool boolValue && boolValue;
+        }
+
+        private static int GetOptionalInt(ConnectionInfo connectionInfo, string propertyName)
+        {
+            object? value = GetOptionalValue(connectionInfo, propertyName);
+            return value is int intValue ? intValue : 0;
+        }
+
+        private static string GetOptionalString(ConnectionInfo connectionInfo, string propertyName) =>
+            GetOptionalValue(connectionInfo, propertyName)?.ToString() ?? string.Empty;
+
+        private static object? GetOptionalValue(ConnectionInfo connectionInfo, string propertyName)
         {
             PropertyInfo? property = connectionInfo.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-            return property?.GetValue(connectionInfo)?.ToString() ?? string.Empty;
+            return property?.GetValue(connectionInfo);
         }
 
         private static int ColorDepth(string value) => value switch
@@ -280,6 +305,12 @@ namespace mRemoteNG.Connection.Protocol.RDP
         };
 
         private static int Bool(bool value) => value ? 1 : 0;
+
+        private static void AddOptionalBool(ICollection<string> lines, string key, ConnectionInfo connectionInfo, string propertyName)
+        {
+            if (GetOptionalValue(connectionInfo, propertyName) is bool value)
+                AddInt(lines, key, Bool(value));
+        }
 
         private static void AddInt(ICollection<string> lines, string key, int value) =>
             lines.Add($"{key}:i:{value.ToString(CultureInfo.InvariantCulture)}");
