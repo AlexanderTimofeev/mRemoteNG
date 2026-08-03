@@ -21,6 +21,8 @@ using mRemoteNG.Properties;
 using mRemoteNG.Tree;
 using mRemoteNG.Resources.Language;
 using mRemoteNG.Tree.Root;
+using mRemoteNG.Tools;
+using mRemoteNG.Tools.Attributes;
 using System.Runtime.Versioning;
 
 namespace mRemoteNG.Connection
