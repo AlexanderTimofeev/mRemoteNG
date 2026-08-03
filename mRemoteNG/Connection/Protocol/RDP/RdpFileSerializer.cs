@@ -26,7 +26,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
         public static string Serialize(
             ConnectionInfo connectionInfo,
             RdpResolvedCredentials destinationCredentials,
-            RdpResolvedCredentials gatewayCredentials)
+            RdpResolvedCredentials gatewayCredentials,
+            bool includeGatewayAccessToken = true)
         {
             ArgumentNullException.ThrowIfNull(connectionInfo);
 
@@ -71,7 +72,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             AddInt(lines, "enablerdsaadauth", Bool(connectionInfo.EnableRdsAadAuth));
             AddString(lines, "loadbalanceinfo", connectionInfo.LoadBalanceInfo);
 
-            AddGateway(lines, connectionInfo, gatewayCredentials);
+            AddGateway(lines, connectionInfo, gatewayCredentials, includeGatewayAccessToken);
 
             AddString(lines, "alternate shell", connectionInfo.RDPStartProgram);
             AddString(lines, "shell working directory", connectionInfo.RDPStartProgramWorkDir);
@@ -196,7 +197,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
         private static void AddGateway(
             ICollection<string> lines,
             ConnectionInfo connectionInfo,
-            RdpResolvedCredentials gatewayCredentials)
+            RdpResolvedCredentials gatewayCredentials,
+            bool includeGatewayAccessToken)
         {
             string usage = connectionInfo.RDGatewayUsageMethod.ToString();
             int usageValue = usage switch
@@ -207,20 +209,24 @@ namespace mRemoteNG.Connection.Protocol.RDP
             };
             AddInt(lines, "gatewayusagemethod", usageValue);
             AddString(lines, "gatewayhostname", connectionInfo.RDGatewayHostname);
+            if (usageValue != 0 && !string.IsNullOrWhiteSpace(connectionInfo.RDGatewayHostname))
+                AddInt(lines, "gatewayprofileusagemethod", 1);
 
             string credentialSource = connectionInfo.RDGatewayUseConnectionCredentials.ToString();
             int sourceValue = credentialSource switch
             {
                 "SmartCard" => 1,
-                "Yes" => 2,
                 "AccessToken" => 5,
-                "ExternalCredentialProvider" => 0,
-                _ => 4
+                _ => 0
             };
             AddInt(lines, "gatewaycredentialssource", sourceValue);
             AddInt(lines, "promptcredentialonce", Bool(connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.Yes));
             AddString(lines, "gatewayusername", BuildUsername(gatewayCredentials.Username, gatewayCredentials.Domain));
-            AddString(lines, "gatewayaccesstoken", connectionInfo.RDGatewayAccessToken);
+            if (includeGatewayAccessToken &&
+                connectionInfo.RDGatewayUseConnectionCredentials == RDGatewayUseConnectionCredentials.AccessToken)
+            {
+                AddString(lines, "gatewayaccesstoken", connectionInfo.RDGatewayAccessToken);
+            }
         }
 
         private static void AddRemoteApp(ICollection<string> lines, ConnectionInfo connectionInfo)
