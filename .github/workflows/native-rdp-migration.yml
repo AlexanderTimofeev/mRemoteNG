@@ -1,0 +1,53 @@
+name: Native RDP migration patch
+
+on:
+  pull_request:
+    branches: [v1.78.2-dev]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-integration-patch:
+    if: github.head_ref == 'agent/native-mstsc-launch-migrated' || github.ref_name == 'agent/native-mstsc-launch-migrated'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/native-mstsc-launch-migrated
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply integration hunks from old fork
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if grep -q 'public virtual RdpClientMode RdpClientMode' mRemoteNG/Connection/AbstractConnectionRecord.cs; then
+            echo 'Integration patch already applied.'
+            exit 0
+          fi
+
+          git remote add migration-source https://github.com/AlexanderTimofeev/mRemoteNG-robertpopa22.git
+          git fetch migration-source main agent/native-mstsc-launch
+
+          paths=(
+            mRemoteNG/Config/Serializers/ConnectionSerializers/Sql/DataTableDeserializer.cs
+            mRemoteNG/Config/Serializers/ConnectionSerializers/Sql/DataTableSerializer.cs
+            mRemoteNG/Config/Serializers/ConnectionSerializers/Xml/XmlConnectionNodeSerializer28.cs
+            mRemoteNG/Config/Serializers/ConnectionSerializers/Xml/XmlConnectionsDeserializer.cs
+            mRemoteNG/Connection/AbstractConnectionRecord.cs
+            mRemoteNG/Connection/ConnectionInitiator.cs
+            mRemoteNG/Connection/Protocol/RDP/RdpCredentialCacheCleaner.cs
+            mRemoteNG/Schemas/mremoteng_confcons_v2_8.xsd
+            mRemoteNG/UI/Controls/ConnectionContextMenu.cs
+          )
+
+          git diff --binary migration-source/main migration-source/agent/native-mstsc-launch -- "${paths[@]}" > /tmp/native-rdp-integration.patch
+          git apply --3way --index /tmp/native-rdp-integration.patch
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: integrate native mstsc mode with current upstream'
+          git push origin HEAD:agent/native-mstsc-launch-migrated
