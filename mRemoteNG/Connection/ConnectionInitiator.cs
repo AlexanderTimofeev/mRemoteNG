@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using mRemoteNG.App;
 using mRemoteNG.Connection.Protocol;
+using mRemoteNG.Connection.Protocol.RDP;
 using mRemoteNG.Container;
 using mRemoteNG.Messages;
 using mRemoteNG.Properties;
@@ -91,6 +92,22 @@ namespace mRemoteNG.Connection
                 }
 
                 StartPreConnectionExternalApp(connectionInfo);
+
+                if (connectionInfo.Protocol == ProtocolType.RDP &&
+                    connectionInfo.RdpClientMode == RdpClientMode.NativeMstsc)
+                {
+                    if (!string.IsNullOrEmpty(connectionInfoOriginal.SSHTunnelConnectionName))
+                    {
+                        Runtime.MessageCollector.AddMessage(
+                            MessageClass.WarningMsg,
+                            "Native mstsc launch is not available for RDP connections using an mRemoteNG-managed SSH tunnel. Use Embedded mode for this connection.");
+                        return;
+                    }
+
+                    NativeRdpLauncher launcher = new();
+                    launcher.Launch(connectionInfo, force);
+                    return;
+                }
 
                 if (!force.HasFlag(ConnectionInfo.Force.DoNotJump))
                 {
