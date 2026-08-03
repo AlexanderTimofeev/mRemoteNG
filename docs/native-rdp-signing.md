@@ -6,7 +6,7 @@ mRemoteNG can sign every generated file with `rdpsign.exe` before launching `mst
 
 ## Configuration sources
 
-The signing certificate SHA-256 thumbprint can be supplied through either of these sources:
+The signing certificate thumbprint can be supplied through either of these sources:
 
 1. Environment variable:
 
@@ -22,7 +22,14 @@ The signing certificate SHA-256 thumbprint can be supplied through either of the
 
 The environment variable has priority. Spaces and other non-hexadecimal characters are removed automatically and hexadecimal letters are normalized to uppercase.
 
-When no thumbprint is configured, mRemoteNG launches the generated file without signing it. When a thumbprint is configured but signing fails, the connection is not launched with an unsigned file; the failure is written to the mRemoteNG log.
+Supported thumbprint formats:
+
+- 40 hexadecimal characters: SHA-1 certificate thumbprint, passed to `rdpsign.exe /sha1`;
+- 64 hexadecimal characters: SHA-256 certificate thumbprint, passed to `rdpsign.exe /sha256`.
+
+The SHA-1 thumbprint is only used to locate the certificate in the Windows certificate store. It does not change the certificate's signature algorithm; the certificate created by the script below uses SHA-256.
+
+When no thumbprint is configured, mRemoteNG launches the generated file without signing it. When a thumbprint is configured but signing fails, mRemoteNG records a warning and continues by launching the file unsigned. This keeps native RDP usable even when the certificate configuration is missing or invalid.
 
 ## Create a local signing certificate
 
@@ -59,21 +66,30 @@ Import-Certificate `
     -FilePath $cerPath `
     -CertStoreLocation "Cert:\CurrentUser\TrustedPublisher" | Out-Null
 
-$sha256 = (Get-FileHash $cerPath -Algorithm SHA256).Hash
+# Use the certificate thumbprint, not Get-FileHash of the exported .cer file.
+$thumbprint = $cert.Thumbprint.Replace(" ", "")
 
 $configDirectory = Join-Path $env:LOCALAPPDATA "mRemoteNG"
 New-Item $configDirectory -ItemType Directory -Force | Out-Null
 
 Set-Content `
     -Path (Join-Path $configDirectory "native-rdp-signing-thumbprint.txt") `
-    -Value $sha256 `
+    -Value $thumbprint `
     -NoNewline
 
 Write-Host "RDP signing certificate configured:"
-Write-Host $sha256
+Write-Host $thumbprint
 ```
 
 This creates the certificate in `CurrentUser\My`, trusts its public certificate in `CurrentUser\Root`, and adds it to `CurrentUser\TrustedPublisher`. No machine-wide certificate installation is required.
+
+Do not use this value:
+
+```powershell
+(Get-FileHash $cerPath -Algorithm SHA256).Hash
+```
+
+That command returns the hash of the exported `.cer` file itself, not the certificate thumbprint expected by `rdpsign.exe`.
 
 ## Configure through an environment variable
 
@@ -82,7 +98,7 @@ Instead of the text file, set the environment variable for the current user:
 ```powershell
 [Environment]::SetEnvironmentVariable(
     "MREMOTENG_RDP_SIGN_CERT_THUMBPRINT",
-    $sha256,
+    $thumbprint,
     "User")
 ```
 
@@ -98,21 +114,34 @@ For every native launch, mRemoteNG performs the following steps:
    %LOCALAPPDATA%\mRemoteNG\Temp\Rdp
    ```
 
-2. Resolve the configured thumbprint.
-3. Run:
+2. Resolve and normalize the configured thumbprint.
+3. Select `/sha1` for a 40-character thumbprint or `/sha256` for a 64-character thumbprint.
+4. Run:
+
+   ```text
+   %SystemRoot%\System32\rdpsign.exe /sha1 <thumbprint> /q <file.rdp>
+   ```
+
+   or:
 
    ```text
    %SystemRoot%\System32\rdpsign.exe /sha256 <thumbprint> /q <file.rdp>
    ```
 
-4. Abort if `rdpsign.exe` is missing, times out after 30 seconds, or returns a non-zero exit code.
-5. Launch the signed file with `mstsc.exe`.
-6. Schedule normal temporary-file cleanup.
+5. Launch the signed file with `mstsc.exe` when signing succeeds.
+6. If signing fails, write a warning and launch the file unsigned.
+7. Schedule normal temporary-file cleanup.
 
 A successful signed launch is recorded in the log as:
 
 ```text
 Launched mstsc.exe for RDP connection '<name>' using a signed RDP file.
+```
+
+A signing failure is recorded as a warning similar to:
+
+```text
+Unable to sign the temporary RDP file. It will be launched unsigned. ...
 ```
 
 ## Verify the certificate
@@ -125,9 +154,40 @@ Get-ChildItem Cert:\CurrentUser\My |
     Select-Object Subject, FriendlyName, Thumbprint, NotAfter
 ```
 
-Verify that the configured value matches the SHA-256 thumbprint expected by `rdpsign.exe` and that the certificate is still valid.
+Check the configured file:
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\mRemoteNG\native-rdp-signing-thumbprint.txt"
+```
+
+The value should match the `Thumbprint` displayed for the certificate named `mRemoteNG RDP Publisher` and should normally contain 40 hexadecimal characters.
+
+You can test signing manually without modifying the RDP file by using `/l`:
+
+```powershell
+$thumbprint = Get-Content "$env:LOCALAPPDATA\mRemoteNG\native-rdp-signing-thumbprint.txt"
+& "$env:SystemRoot\System32\rdpsign.exe" /sha1 $thumbprint /l "C:\Path\To\Test.rdp"
+```
 
 ## Troubleshooting
+
+### Native mode does nothing after enabling signing
+
+Older builds aborted the complete launch when `rdpsign.exe` returned an error. Update to a build containing the signing fallback fix.
+
+Also replace any value generated with `Get-FileHash` by the real certificate thumbprint:
+
+```powershell
+$cert = Get-ChildItem Cert:\CurrentUser\My |
+    Where-Object FriendlyName -eq "mRemoteNG RDP Publisher" |
+    Where-Object HasPrivateKey |
+    Sort-Object NotAfter -Descending |
+    Select-Object -First 1
+
+$cert.Thumbprint | Set-Content `
+    "$env:LOCALAPPDATA\mRemoteNG\native-rdp-signing-thumbprint.txt" `
+    -NoNewline
+```
 
 ### `rdpsign.exe was not found`
 
