@@ -16,14 +16,6 @@ namespace mRemoteNGTests.Config.Serializers.ConnectionSerializers.Sql
     public class NativeRdpDataTableSchemaTests
     {
         [Test]
-        public void ExpectedSchemaContainsRdpClientMode()
-        {
-            var schema = DataTableSerializer.GetExpectedSchema();
-            Assert.That(schema.Columns.Contains("RdpClientMode"), Is.True);
-            Assert.That(schema.Columns["RdpClientMode"]!.DataType, Is.EqualTo(typeof(string)));
-        }
-
-        [Test]
         public void NativeModeSurvivesSqlDataTableRoundTrip()
         {
             using SecureString key = new();
@@ -38,6 +30,7 @@ namespace mRemoteNGTests.Config.Serializers.ConnectionSerializers.Sql
             };
 
             var table = serializer.Serialize(source);
+            Assert.That(table.Columns.Contains("RdpClientMode"), Is.True);
             Assert.That(table.Rows[0]["RdpClientMode"], Is.EqualTo(RdpClientMode.NativeMstsc.ToString()));
 
             DataTableDeserializer deserializer = new(cryptographyProvider, key);
