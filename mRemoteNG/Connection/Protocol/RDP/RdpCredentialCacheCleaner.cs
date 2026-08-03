@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using mRemoteNG.App;
@@ -7,18 +8,7 @@ using mRemoteNG.Messages;
 namespace mRemoteNG.Connection.Protocol.RDP
 {
     /// <summary>
-    /// Helper to remove a cached RDP credential (TERMSRV/&lt;hostname&gt;) from the Windows
-    /// Credential Manager before initiating a connection.
-    /// <para>
-    /// Windows stores RDP credentials when the user ticks "Remember me" in the mstsc credential
-    /// prompt. On subsequent RDP connections to the same host, Windows substitutes the cached
-    /// credential for whatever the calling application supplies, which silently breaks
-    /// password rotation or credential changes made inside mRemoteNG.
-    /// </para>
-    /// <para>
-    /// Calling this helper before connecting removes the cached entry, so the credentials
-    /// configured on the connection are used as-is. Behaviour is opt-in per connection.
-    /// </para>
+    /// Outcome of an attempt to remove cached RDP credentials from Windows Credential Manager.
     /// </summary>
     public enum ClearCachedCredentialsResult
     {
@@ -27,58 +17,107 @@ namespace mRemoteNG.Connection.Protocol.RDP
         Failed,
     }
 
+    /// <summary>
+    /// Removes both mstsc-managed domain-password credentials and mRemoteNG native-launch generic
+    /// credentials for TERMSRV targets.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     internal static class RdpCredentialCacheCleaner
     {
-        // CredDeleteW: https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-creddeletew
+        private const int ErrorNotFound = 1168;
+
         [DllImport("Advapi32.dll", SetLastError = true, EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CredDelete(string target, CredentialType type, int reservedFlag);
 
         private enum CredentialType : uint
         {
             Generic = 1,
             DomainPassword = 2,
-            DomainCertificate = 3,
         }
 
-        private const int ERROR_NOT_FOUND = 1168;
-
         /// <summary>
-        /// Removes the cached TERMSRV/&lt;hostname&gt; entry from the current user's Windows
-        /// Credential Manager.
+        /// Removes cached credentials for a destination hostname.
         /// </summary>
-        /// <param name="hostname">Hostname or IP address used in the RDP connection.</param>
-        /// <returns>Outcome of the deletion attempt.</returns>
         public static ClearCachedCredentialsResult ClearCachedCredentials(string hostname)
         {
             if (string.IsNullOrWhiteSpace(hostname))
                 return ClearCachedCredentialsResult.Failed;
 
-            string target = "TERMSRV/" + hostname;
+            return ClearTargets([NativeRdpLauncher.BuildCredentialTarget(hostname)]);
+        }
+
+        /// <summary>
+        /// Removes destination and separate RD Gateway credential targets for a connection.
+        /// </summary>
+        public static ClearCachedCredentialsResult ClearCachedCredentials(ConnectionInfo connectionInfo)
+        {
+            ArgumentNullException.ThrowIfNull(connectionInfo);
+            if (string.IsNullOrWhiteSpace(connectionInfo.Hostname))
+                return ClearCachedCredentialsResult.Failed;
+
+            HashSet<string> targets = new(StringComparer.OrdinalIgnoreCase)
+            {
+                NativeRdpLauncher.BuildCredentialTarget(connectionInfo.Hostname)
+            };
+
+            if (connectionInfo.RDGatewayUsageMethod != RDGatewayUsageMethod.Never &&
+                !string.IsNullOrWhiteSpace(connectionInfo.RDGatewayHostname))
+            {
+                targets.Add(NativeRdpLauncher.BuildCredentialTarget(connectionInfo.RDGatewayHostname));
+            }
+
+            return ClearTargets(targets);
+        }
+
+        private static ClearCachedCredentialsResult ClearTargets(IEnumerable<string> targets)
+        {
+            bool deletedAny = false;
+            bool failedAny = false;
+
+            foreach (string target in targets)
+            {
+                foreach (CredentialType type in new[] { CredentialType.Generic, CredentialType.DomainPassword })
+                {
+                    ClearCachedCredentialsResult result = DeleteCredential(target, type);
+                    deletedAny |= result == ClearCachedCredentialsResult.Deleted;
+                    failedAny |= result == ClearCachedCredentialsResult.Failed;
+                }
+            }
+
+            if (failedAny)
+                return ClearCachedCredentialsResult.Failed;
+            return deletedAny
+                ? ClearCachedCredentialsResult.Deleted
+                : ClearCachedCredentialsResult.NotFound;
+        }
+
+        private static ClearCachedCredentialsResult DeleteCredential(string target, CredentialType type)
+        {
             try
             {
-                bool deleted = CredDelete(target, CredentialType.DomainPassword, 0);
-                if (deleted)
+                if (CredDelete(target, type, 0))
                 {
-                    Runtime.MessageCollector.AddMessage(MessageClass.InformationMsg,
-                        $"Cleared cached RDP credentials for {target}.");
+                    Runtime.MessageCollector.AddMessage(
+                        MessageClass.InformationMsg,
+                        $"Cleared cached RDP credential {target} ({type}).");
                     return ClearCachedCredentialsResult.Deleted;
                 }
 
-                int err = Marshal.GetLastWin32Error();
-                if (err == ERROR_NOT_FOUND)
-                {
+                int error = Marshal.GetLastWin32Error();
+                if (error == ErrorNotFound)
                     return ClearCachedCredentialsResult.NotFound;
-                }
 
-                Runtime.MessageCollector.AddMessage(MessageClass.WarningMsg,
-                    $"CredDelete failed for {target} (Win32 error {err}).");
+                Runtime.MessageCollector.AddMessage(
+                    MessageClass.WarningMsg,
+                    $"CredDelete failed for {target} ({type}, Win32 error {error}).");
                 return ClearCachedCredentialsResult.Failed;
             }
             catch (Exception ex)
             {
                 Runtime.MessageCollector.AddExceptionStackTrace(
-                    $"Failed to clear cached RDP credentials for {target}.", ex);
+                    $"Failed to clear cached RDP credential {target} ({type}).",
+                    ex);
                 return ClearCachedCredentialsResult.Failed;
             }
         }

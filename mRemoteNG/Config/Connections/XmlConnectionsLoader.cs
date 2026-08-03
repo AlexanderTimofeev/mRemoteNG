@@ -1,4 +1,4 @@
-﻿using mRemoteNG.Config.DataProviders;
+using mRemoteNG.Config.DataProviders;
 using mRemoteNG.Tools;
 using mRemoteNG.Tree;
 using System;

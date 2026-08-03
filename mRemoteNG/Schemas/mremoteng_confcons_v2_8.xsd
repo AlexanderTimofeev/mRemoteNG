@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 
 <xs:schema id="mremoteng_confcons_v2_8"
            targetNamespace="http://mremoteng.org"
@@ -42,6 +42,7 @@
     <xs:attribute name="Hostname" type="xs:string" use="required" />
     <xs:attribute name="Protocol" type="xs:string" use="required" />
     <xs:attribute name="RdpVersion" type="xs:string" use="required" />
+    <xs:attribute name="RdpClientMode" type="xs:string" use="optional" />
     <xs:attribute name="VmId" type="xs:string" use="required" />
     <xs:attribute name="UseVmId" type="xs:boolean" use="required" />
     <xs:attribute name="UseEnhancedMode" type="xs:boolean" use="required" />
