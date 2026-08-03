@@ -18,6 +18,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
     {
         private const string SigningThumbprintEnvironmentVariable = "MREMOTENG_RDP_SIGN_CERT_THUMBPRINT";
         private const string SigningThumbprintFileName = "native-rdp-signing-thumbprint.txt";
+        private const int CryptENotFound = unchecked((int)0x80092004);
         private static readonly TimeSpan SigningTimeout = TimeSpan.FromSeconds(30);
         private static int _signingFailureNotificationShown;
 
@@ -239,12 +240,54 @@ namespace mRemoteNG.Connection.Protocol.RDP
                     "Use certificate.GetCertHashString(HashAlgorithmName.SHA256), not certificate.Thumbprint.");
             }
 
-            ValidateSigningCertificate(certificateSha256Hash);
-
+            string certificateSha1Thumbprint = ValidateSigningCertificate(certificateSha256Hash);
             string signerExecutable = Path.Combine(Environment.SystemDirectory, "rdpsign.exe");
             if (!File.Exists(signerExecutable))
                 throw new FileNotFoundException("rdpsign.exe was not found, so the temporary RDP file could not be signed.", signerExecutable);
 
+            RdpsignResult primaryResult = RunRdpsign(
+                signerExecutable,
+                certificateSha256Hash,
+                rdpPath);
+            if (primaryResult.ExitCode == 0)
+                return;
+
+            if (primaryResult.ExitCode == CryptENotFound &&
+                !string.IsNullOrWhiteSpace(certificateSha1Thumbprint))
+            {
+                RdpsignResult compatibilityResult = RunRdpsign(
+                    signerExecutable,
+                    certificateSha1Thumbprint,
+                    rdpPath);
+                if (compatibilityResult.ExitCode == 0)
+                {
+                    Runtime.MessageCollector.AddMessage(
+                        MessageClass.WarningMsg,
+                        "rdpsign.exe could not locate the certificate by its SHA-256 hash and succeeded using the certificate SHA-1 thumbprint compatibility fallback.");
+                    return;
+                }
+
+                throw CreateRdpsignFailure(
+                    primaryResult,
+                    compatibilityResult,
+                    certificateSha256Hash,
+                    certificateSha1Thumbprint,
+                    rdpPath);
+            }
+
+            throw CreateRdpsignFailure(
+                primaryResult,
+                null,
+                certificateSha256Hash,
+                certificateSha1Thumbprint,
+                rdpPath);
+        }
+
+        private static RdpsignResult RunRdpsign(
+            string signerExecutable,
+            string certificateHash,
+            string rdpPath)
+        {
             Encoding outputEncoding = GetRdpsignOutputEncoding();
             ProcessStartInfo signStartInfo = new(signerExecutable)
             {
@@ -257,8 +300,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 WorkingDirectory = Environment.SystemDirectory
             };
             signStartInfo.ArgumentList.Add("/sha256");
-            signStartInfo.ArgumentList.Add(certificateSha256Hash);
-            signStartInfo.ArgumentList.Add("/q");
+            signStartInfo.ArgumentList.Add(certificateHash);
+            signStartInfo.ArgumentList.Add("/v");
             signStartInfo.ArgumentList.Add(rdpPath);
 
             using Process signer = Process.Start(signStartInfo)
@@ -279,25 +322,65 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new TimeoutException("Signing the temporary RDP file timed out after 30 seconds.");
             }
 
-            if (signer.ExitCode != 0)
-            {
-                string details = string.Join(
-                    Environment.NewLine,
-                    new[] { standardError, standardOutput }
-                        .Where(value => !string.IsNullOrWhiteSpace(value))
-                        .Select(value => value.Trim()));
-                throw new InvalidOperationException(
-                    string.IsNullOrEmpty(details)
-                        ? $"rdpsign.exe failed with exit code {signer.ExitCode}."
-                        : $"rdpsign.exe failed with exit code {signer.ExitCode}.{Environment.NewLine}{details}");
-            }
+            string output = string.Join(
+                Environment.NewLine,
+                new[] { standardError, standardOutput }
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value.Trim()));
+
+            return new RdpsignResult(signer.ExitCode, output);
         }
 
-        private static void ValidateSigningCertificate(string certificateSha256Hash)
+        private static InvalidOperationException CreateRdpsignFailure(
+            RdpsignResult primaryResult,
+            RdpsignResult? compatibilityResult,
+            string certificateSha256Hash,
+            string certificateSha1Thumbprint,
+            string rdpPath)
+        {
+            StringBuilder details = new();
+            details.Append("rdpsign.exe failed with exit code ")
+                .Append(FormatExitCode(primaryResult.ExitCode))
+                .Append(" while using the configured SHA-256 certificate hash.")
+                .AppendLine()
+                .Append("SHA-256 hash: ")
+                .AppendLine(certificateSha256Hash)
+                .Append("RDP file: ")
+                .AppendLine(rdpPath);
+
+            if (!string.IsNullOrWhiteSpace(primaryResult.Output))
+            {
+                details.AppendLine("Primary rdpsign output:")
+                    .AppendLine(primaryResult.Output);
+            }
+
+            if (compatibilityResult.HasValue)
+            {
+                details.Append("Compatibility fallback using SHA-1 thumbprint ")
+                    .Append(certificateSha1Thumbprint)
+                    .Append(" failed with exit code ")
+                    .Append(FormatExitCode(compatibilityResult.Value.ExitCode))
+                    .AppendLine(".");
+
+                if (!string.IsNullOrWhiteSpace(compatibilityResult.Value.Output))
+                {
+                    details.AppendLine("Compatibility rdpsign output:")
+                        .AppendLine(compatibilityResult.Value.Output);
+                }
+            }
+
+            return new InvalidOperationException(details.ToString().TrimEnd());
+        }
+
+        private static string FormatExitCode(int exitCode) =>
+            $"0x{unchecked((uint)exitCode):X8} ({exitCode})";
+
+        private static string ValidateSigningCertificate(string certificateSha256Hash)
         {
             bool certificateFound = false;
             bool certificateWithPrivateKeyFound = false;
             bool certificateIsCurrentlyValid = false;
+            string certificateSha1Thumbprint = string.Empty;
 
             foreach (StoreLocation storeLocation in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
             {
@@ -325,6 +408,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                     }
 
                     certificateFound = true;
+                    certificateSha1Thumbprint = NormalizeThumbprint(certificate.Thumbprint);
                     if (!certificate.HasPrivateKey)
                         continue;
 
@@ -359,6 +443,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new InvalidOperationException(
                     "The configured RDP signing certificate is expired or not yet valid.");
             }
+
+            return certificateSha1Thumbprint;
         }
 
         private static Encoding GetRdpsignOutputEncoding()
@@ -449,5 +535,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
             if (connectionInfo.UseVmId || connectionInfo.UseEnhancedMode)
                 throw new NotSupportedException("Hyper-V VM ID and Enhanced Session connections require the embedded RDP control. Use Embedded mode for this connection.");
         }
+
+        private readonly record struct RdpsignResult(int ExitCode, string Output);
     }
 }
