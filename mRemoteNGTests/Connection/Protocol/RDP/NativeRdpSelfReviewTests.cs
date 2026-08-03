@@ -117,5 +117,20 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
             Assert.That(suppressedResult, Does.Not.Contain("active-token"));
             Assert.That(suppressedResult, Does.Not.Contain("gatewayaccesstoken"));
         }
+
+        [Test]
+        public void StringValuesCannotInjectAdditionalRdpProperties()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                RDPStartProgram = "notepad.exe\r\nmalicious-property:i:1"
+            };
+
+            string result = RdpFileSerializer.Serialize(connectionInfo);
+
+            Assert.That(result, Does.Not.Contain("\r\nmalicious-property:i:1\r\n"));
+            Assert.That(result, Does.Contain("alternate shell:s:notepad.exe  malicious-property:i:1"));
+        }
     }
 }
