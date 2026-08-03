@@ -58,7 +58,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         force);
 
                 WriteCredentialIfAvailable(connectionInfo.Hostname, destinationCredentials);
-                WriteGatewayCredentialIfAvailable(connectionInfo, resolvedConnectionCredentials, gatewayCredentials);
+                WriteGatewayCredentialIfAvailable(connectionInfo, destinationCredentials, gatewayCredentials);
 
                 bool includeGatewayAccessToken = !suppressCredentialInjection && !connectionInfo.UseRCG;
                 rdpPath = _fileStore.Create(
@@ -139,7 +139,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private static void WriteGatewayCredentialIfAvailable(
             ConnectionInfo connectionInfo,
-            RdpResolvedCredentials connectionCredentials,
+            RdpResolvedCredentials writtenDestinationCredentials,
             RdpResolvedCredentials gatewayCredentials)
         {
             if (!gatewayCredentials.HasPassword || string.IsNullOrWhiteSpace(connectionInfo.RDGatewayHostname))
@@ -148,12 +148,11 @@ namespace mRemoteNG.Connection.Protocol.RDP
             string destinationTarget = BuildCredentialTarget(connectionInfo.Hostname);
             string gatewayTarget = BuildCredentialTarget(connectionInfo.RDGatewayHostname);
             bool sameTarget = string.Equals(destinationTarget, gatewayTarget, StringComparison.OrdinalIgnoreCase);
-            bool sameCredentials = gatewayCredentials.Equals(connectionCredentials);
+            bool sameCredentials = gatewayCredentials.Equals(writtenDestinationCredentials);
 
-            // Credential Manager can hold only one generic credential for a target. If an unusual
-            // setup uses the destination host itself as a gateway with different credentials, keep
-            // the destination credential and allow mstsc to prompt for the gateway credential.
-            if (sameTarget && !sameCredentials)
+            // Credential Manager can hold only one generic credential for a target. Preserve a
+            // different destination credential only when one was actually written for this launch.
+            if (sameTarget && writtenDestinationCredentials.HasPassword && !sameCredentials)
                 return;
 
             WindowsCredentialManager.Write(
