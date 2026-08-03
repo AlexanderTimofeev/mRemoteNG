@@ -48,7 +48,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 WriteCredentialIfAvailable(connectionInfo.Hostname, destinationCredentials);
                 WriteGatewayCredentialIfAvailable(connectionInfo, destinationCredentials, gatewayCredentials);
 
-                bool includeGatewayAccessToken = !force.HasFlag(ConnectionInfo.Force.NoCredentials);
+                bool includeGatewayAccessToken = !prompt && !integratedSecurity;
                 rdpPath = _fileStore.Create(
                     RdpFileSerializer.Serialize(
                         connectionInfo,
