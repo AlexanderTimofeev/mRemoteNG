@@ -149,6 +149,39 @@ $sha256 | Set-Content `
 
 Completely close all mRemoteNG processes before starting it again.
 
+## Trust the publisher and suppress the security dialog
+
+A valid signature proves who published the RDP file, but Windows can still show a one-time trust dialog for a publisher that has not yet been approved for RDP launches.
+
+For one Windows user on one computer:
+
+1. Select the required redirected resources, such as Clipboard or WebAuthn.
+2. Select **Remember my choice for remote connections from this publisher**.
+3. Select **Connect**.
+
+The remembered choice is tied to the signing certificate. Replacing the certificate creates a new publisher identity and requires approval again.
+
+For centrally managed or repeatable deployment, configure this policy:
+
+```text
+Computer Configuration or User Configuration
+  Administrative Templates
+    Windows Components
+      Remote Desktop Services
+        Remote Desktop Connection Client
+          Specify thumbprints of certificates representing trusted .rdp publishers
+```
+
+When a matching signing certificate is listed in this policy, Remote Desktop Connection skips the security warning and automatically enables the redirections requested by the signed RDP file.
+
+On systems whose policy still uses the older name **Specify SHA1 thumbprints of certificates representing trusted .rdp publishers**, use the certificate's normal 40-character SHA-1 thumbprint:
+
+```powershell
+$cert.Thumbprint
+```
+
+On Windows with the July 2026 or later RDP security policy update, the policy also supports SHA-2 thumbprints. Follow the Help text shown in the local Group Policy editor for the required SHA-2 prefix and format on that Windows build.
+
 ## Signing flow
 
 For every native launch, mRemoteNG:
