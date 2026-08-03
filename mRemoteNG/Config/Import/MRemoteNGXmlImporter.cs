@@ -28,7 +28,7 @@ namespace mRemoteNG.Config.Import
 
             FileDataProvider dataProvider = new(fileName);
             string xmlString = dataProvider.Load();
-            NativeRdpModeXmlDeserializer xmlConnectionsDeserializer = new();
+            XmlConnectionsDeserializer xmlConnectionsDeserializer = new();
             Tree.ConnectionTreeModel connectionTreeModel = xmlConnectionsDeserializer.Deserialize(xmlString, true);
 
             ContainerInfo rootImportContainer = new() { Name = Path.GetFileNameWithoutExtension(fileName)};

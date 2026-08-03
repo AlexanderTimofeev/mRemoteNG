@@ -26,7 +26,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
         private readonly SaveFilter _saveFilter = saveFilter.ThrowIfNull(nameof(saveFilter));
         private int _currentNodeIndex;
 
-        public Version Version { get; } = new Version(3, 0);
+        public Version Version { get; } = new Version(3, 1);
 
         public void SetSourceDataTable(DataTable sourceDataTable)
         {

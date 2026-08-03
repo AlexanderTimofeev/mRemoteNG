@@ -29,7 +29,7 @@ namespace mRemoteNG.Config.Connections
         {
             FileDataProvider dataProvider = new(_connectionFilePath);
             string xmlString = dataProvider.Load();
-            NativeRdpModeXmlDeserializer deserializer = new(PromptForPassword);
+            XmlConnectionsDeserializer deserializer = new(PromptForPassword);
             return deserializer.Deserialize(xmlString);
         }
 

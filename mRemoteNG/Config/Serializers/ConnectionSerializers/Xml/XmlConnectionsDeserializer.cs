@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Security;
 using System.Windows.Forms;
@@ -492,6 +492,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Xml
                     connectionInfo.VmId = xmlnode.GetAttributeAsString("VmId");
                     connectionInfo.UseEnhancedMode = xmlnode.GetAttributeAsBool("UseEnhancedMode");
                     connectionInfo.RdpVersion = xmlnode.GetAttributeAsEnum("RdpVersion", RdpVersion.Highest);
+                    connectionInfo.RdpClientMode = xmlnode.GetAttributeAsEnum("RdpClientMode", RdpClientMode.Embedded);
                     connectionInfo.SSHTunnelConnectionName = xmlnode.GetAttributeAsString("SSHTunnelConnectionName");
                     connectionInfo.OpeningCommand = xmlnode.GetAttributeAsString("OpeningCommand");
                     connectionInfo.SSHOptions = xmlnode.GetAttributeAsString("SSHOptions");
