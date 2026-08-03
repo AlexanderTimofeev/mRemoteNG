@@ -2,31 +2,23 @@
 
 Native `mstsc` mode generates a temporary `.rdp` file for every connection launch. Windows can display a security confirmation dialog for unsigned files, especially when clipboard, drives, printers, smart cards, audio, or other device redirection is enabled.
 
-mRemoteNG signs generated files in-process by using the configured Windows certificate and the standard CMS/PKCS#7 signature format understood by `mstsc.exe`.
+mRemoteNG signs generated files in-process by using the configured Windows certificate and the CMS/PKCS#7 signature format understood by `mstsc.exe`.
 
 ## Certificate requirement
 
-The certificate is an **RDP file publisher certificate**. Use a certificate with the **Code Signing** enhanced key usage:
+Microsoft documents the signing certificate as a trusted `.rdp` file publisher certificate. The public `rdpsign` documentation does not require one specific Enhanced Key Usage OID.
 
-```text
-1.3.6.1.5.5.7.3.3
-```
-
-Do not use the Remote Desktop Authentication EKU:
-
-```text
-1.3.6.1.4.1.311.54.1.2
-```
-
-That EKU identifies a certificate used by an RDP server to authenticate the remote endpoint. It is not the publishing purpose used to sign an `.rdp` configuration file. Modern Windows clients can reject an RDP-file signature created with a certificate that has an incompatible EKU.
-
-The certificate must also:
+The certificate must:
 
 - contain a private key available to the mRemoteNG user;
 - allow digital signatures;
 - be currently valid;
 - be trusted in `CurrentUser\Root` or through a normal trusted certificate chain;
-- be present in `CurrentUser\TrustedPublisher` for publisher trust.
+- be present in `CurrentUser\TrustedPublisher` when the publisher should be trusted locally.
+
+An EKU extension may be absent. An absent EKU normally means the certificate is not restricted to a particular enhanced usage. Do not reject an otherwise valid publisher certificate solely because `$certificate.Extensions` contains no `2.5.29.37` extension.
+
+The open-source reverse-engineered `nfedera/rdpsign` reference demonstrates a certificate with `serverAuth`, while other operational guidance commonly uses code-signing-style certificates. Because Microsoft does not publish an EKU requirement for `.rdp` publishers, EKU should be treated as diagnostic information rather than the cause of a signature-format verification failure.
 
 ## Required configuration value
 
@@ -56,11 +48,13 @@ The SHA-256 certificate hash can be supplied through either source:
    %LOCALAPPDATA%\mRemoteNG\native-rdp-signing-thumbprint.txt
    ```
 
-The process environment variable has priority over the text file. Restart mRemoteNG after changing a persistent environment variable.
+The process environment variable has priority over the text file. A process can inherit an older value from PowerShell, Visual Studio, or Explorer. Always check the `Effective source` and `Effective hash` fields in `native-rdp-signing.log` after changing certificates.
 
 ## Create and configure a local publisher certificate
 
-Run this PowerShell script as the same Windows user that runs mRemoteNG:
+This example creates a code-signing-style certificate. That is a practical publisher certificate choice, but mRemoteNG does not require a specific EKU.
+
+Run the script as the same Windows user that runs mRemoteNG:
 
 ```powershell
 $cert = New-SelfSignedCertificate `
@@ -117,23 +111,43 @@ Expected SHA-256 hash length:
 64
 ```
 
-Completely close and restart mRemoteNG after running the script.
+## Inspect certificate usage extensions
 
-## Verify the EKU
+Use `EnhancedKeyUsageList` first:
 
 ```powershell
-$cert = Get-ChildItem Cert:\CurrentUser\My |
-    Where-Object FriendlyName -eq "mRemoteNG RDP File Publisher" |
-    Where-Object HasPrivateKey |
-    Sort-Object NotAfter -Descending |
-    Select-Object -First 1
+$cert.EnhancedKeyUsageList |
+    Select-Object FriendlyName, ObjectId
+```
 
+Inspect the raw EKU extension when present:
+
+```powershell
 $cert.Extensions |
     Where-Object Oid.Value -eq '2.5.29.37' |
     ForEach-Object { $_.Format($true) }
 ```
 
-The output must include Code Signing (`1.3.6.1.5.5.7.3.3`).
+No output from both commands means the certificate has no EKU restriction. This is not by itself a signing error.
+
+## Ensure the new hash reaches mRemoteNG
+
+When replacing a certificate, set both the current PowerShell process value and the persistent user value before launching mRemoteNG from that shell:
+
+```powershell
+$env:MREMOTENG_RDP_SIGN_CERT_THUMBPRINT = $sha256
+
+[Environment]::SetEnvironmentVariable(
+    "MREMOTENG_RDP_SIGN_CERT_THUMBPRINT",
+    $sha256,
+    "User")
+
+$sha256 | Set-Content `
+    "$env:LOCALAPPDATA\mRemoteNG\native-rdp-signing-thumbprint.txt" `
+    -NoNewline
+```
+
+Completely close all mRemoteNG processes before starting it again.
 
 ## Signing flow
 
