@@ -37,9 +37,11 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 bool prompt = !integratedSecurity &&
                               (force.HasFlag(ConnectionInfo.Force.NoCredentials) || connectionInfo.AlwaysPromptForCredentials);
 
-                RdpResolvedCredentials destinationCredentials = integratedSecurity || prompt
-                    ? BuildCredentialHint(connectionInfo.Username, connectionInfo.Domain)
-                    : RdpCredentialResolver.ResolveDestination(connectionInfo, force);
+                RdpResolvedCredentials destinationCredentials = integratedSecurity
+                    ? RdpResolvedCredentials.Empty
+                    : prompt
+                        ? BuildCredentialHint(connectionInfo.Username, connectionInfo.Domain)
+                        : RdpCredentialResolver.ResolveDestination(connectionInfo, force);
 
                 RdpResolvedCredentials gatewayCredentials = integratedSecurity || prompt
                     ? RdpResolvedCredentials.Empty
