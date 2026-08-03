@@ -79,7 +79,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         includeGatewayAccessToken),
                     connectionInfo.Name);
 
-                bool signed = SignRdpFileIfConfigured(rdpPath);
+                bool signed = TrySignRdpFileIfConfigured(rdpPath);
 
                 ProcessStartInfo startInfo = new(executable)
                 {
@@ -170,11 +170,35 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 .ToArray());
         }
 
-        private static bool SignRdpFileIfConfigured(string rdpPath)
+        private static bool TrySignRdpFileIfConfigured(string rdpPath)
         {
             string thumbprint = ResolveSigningThumbprint();
             if (string.IsNullOrEmpty(thumbprint))
                 return false;
+
+            try
+            {
+                SignRdpFile(rdpPath, thumbprint);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Runtime.MessageCollector.AddMessage(
+                    MessageClass.WarningMsg,
+                    $"Unable to sign the temporary RDP file. It will be launched unsigned. {ex.Message}");
+                return false;
+            }
+        }
+
+        private static void SignRdpFile(string rdpPath, string thumbprint)
+        {
+            string hashArgument = thumbprint.Length switch
+            {
+                40 => "/sha1",
+                64 => "/sha256",
+                _ => throw new InvalidOperationException(
+                    $"The configured RDP signing certificate thumbprint has {thumbprint.Length} hexadecimal characters; expected 40 for SHA-1 or 64 for SHA-256.")
+            };
 
             string signerExecutable = Path.Combine(Environment.SystemDirectory, "rdpsign.exe");
             if (!File.Exists(signerExecutable))
@@ -188,7 +212,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 RedirectStandardError = true,
                 WorkingDirectory = Environment.SystemDirectory
             };
-            signStartInfo.ArgumentList.Add("/sha256");
+            signStartInfo.ArgumentList.Add(hashArgument);
             signStartInfo.ArgumentList.Add(thumbprint);
             signStartInfo.ArgumentList.Add("/q");
             signStartInfo.ArgumentList.Add(rdpPath);
@@ -224,8 +248,6 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         ? $"rdpsign.exe failed with exit code {signer.ExitCode}."
                         : $"rdpsign.exe failed with exit code {signer.ExitCode}: {details}");
             }
-
-            return true;
         }
 
         private static bool HasConfiguredGateway(ConnectionInfo connectionInfo) =>
