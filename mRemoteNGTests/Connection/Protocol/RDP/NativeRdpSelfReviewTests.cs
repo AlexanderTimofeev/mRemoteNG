@@ -1,3 +1,4 @@
+using System;
 using mRemoteNG.App;
 using mRemoteNG.Connection;
 using mRemoteNG.Connection.Protocol.RDP;
@@ -131,6 +132,53 @@ namespace mRemoteNGTests.Connection.Protocol.RDP
 
             Assert.That(result, Does.Not.Contain("\r\nmalicious-property:i:1\r\n"));
             Assert.That(result, Does.Contain("alternate shell:s:notepad.exe  malicious-property:i:1"));
+        }
+
+        [Test]
+        public void RemoteCredentialGuardRejectsRdGateway()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                UseRCG = true,
+                RDGatewayUsageMethod = RDGatewayUsageMethod.Always,
+                RDGatewayHostname = "gateway.example.test"
+            };
+
+            Assert.That(
+                () => NativeRdpLauncher.Validate(connectionInfo, ConnectionInfo.Force.None),
+                Throws.TypeOf<NotSupportedException>());
+        }
+
+        [Test]
+        public void RemoteCredentialGuardRejectsConnectionBrokerSettings()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                UseRCG = true,
+                LoadBalanceInfo = "tsv://MS Terminal Services Plugin.1.collection"
+            };
+
+            Assert.That(
+                () => NativeRdpLauncher.Validate(connectionInfo, ConnectionInfo.Force.None),
+                Throws.TypeOf<NotSupportedException>());
+        }
+
+        [Test]
+        public void RestrictedAdminAllowsASeparateGateway()
+        {
+            ConnectionInfo connectionInfo = new()
+            {
+                Hostname = "rdp.example.test",
+                UseRestrictedAdmin = true,
+                RDGatewayUsageMethod = RDGatewayUsageMethod.Always,
+                RDGatewayHostname = "gateway.example.test"
+            };
+
+            Assert.That(
+                () => NativeRdpLauncher.Validate(connectionInfo, ConnectionInfo.Force.None),
+                Throws.Nothing);
         }
     }
 }
