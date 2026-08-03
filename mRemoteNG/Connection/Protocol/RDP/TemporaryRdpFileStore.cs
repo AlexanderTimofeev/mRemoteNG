@@ -7,7 +7,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
 {
     public sealed class TemporaryRdpFileStore
     {
-        private static readonly TimeSpan StaleAge = TimeSpan.FromDays(1);
+        private static readonly TimeSpan StaleAge = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan DeleteDelay = TimeSpan.FromSeconds(30);
 
         public string DirectoryPath { get; } = Path.Combine(
