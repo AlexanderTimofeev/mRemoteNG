@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -30,6 +30,7 @@ namespace mRemoteNG.Connection
     public class ConnectionInfo : AbstractConnectionRecord, IHasParent, IInheritable
     {
         private ConnectionInfoInheritance _inheritance;
+        private RdpClientMode _rdpClientMode;
 
         #region Public Properties
 
@@ -55,6 +56,17 @@ namespace mRemoteNG.Connection
 
         [Browsable(false)]
         public bool PleaseConnect { get; set; }
+
+        [LocalizedAttributes.LocalizedCategory(nameof(Language.Protocol), 3),
+         DisplayName("RDP Client"),
+         Description("Choose whether RDP opens inside mRemoteNG or in the native Windows mstsc.exe client."),
+         TypeConverter(typeof(MiscTools.EnumTypeConverter)),
+         AttributeUsedInProtocol(ProtocolType.RDP)]
+        public virtual RdpClientMode RdpClientMode
+        {
+            get => _rdpClientMode;
+            set => SetField(ref _rdpClientMode, value, nameof(RdpClientMode));
+        }
 
         #endregion
 
@@ -108,6 +120,7 @@ namespace mRemoteNG.Connection
                 property.SetValue(this, remotePropertyValue, null);
             }
 
+            RdpClientMode = sourceConnectionInfo.RdpClientMode;
             ConnectionInfoInheritance clonedInheritance = sourceConnectionInfo.Inheritance.Clone(this);
             Inheritance = clonedInheritance;
         }
