@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Security;
 using System.Windows.Forms;
@@ -194,6 +194,7 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Xml
             if (string.IsNullOrWhiteSpace(connectionId))
                 connectionId = Guid.NewGuid().ToString();
             ConnectionInfo connectionInfo = new(connectionId);
+            connectionInfo.RdpClientMode = xmlnode.GetAttributeAsEnum<RdpClientMode>("RdpClientMode");
 
             try
             {
