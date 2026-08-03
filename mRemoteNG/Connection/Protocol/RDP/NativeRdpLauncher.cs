@@ -4,6 +4,9 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using mRemoteNG.App;
@@ -168,7 +171,7 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 return string.Empty;
 
             return new string(value
-                .Where(character => Uri.IsHexDigit(character))
+                .Where(Uri.IsHexDigit)
                 .Select(char.ToUpperInvariant)
                 .ToArray());
         }
@@ -206,15 +209,28 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
             string notification =
                 "The temporary RDP file could not be signed.\r\n\r\n" +
-                "mstsc will open it without a signature, so Windows may display its security confirmation.\r\n" +
-                "The complete error was written to the mRemoteNG log.\r\n\r\n" +
-                exception.Message;
+                "mstsc will continue with an unsigned file, so Windows may display its security confirmation.\r\n\r\n" +
+                "Reason: " + GetUserFriendlySigningFailure(exception) + "\r\n\r\n" +
+                "The complete diagnostic output was written to the mRemoteNG log.";
 
             MessageBox.Show(
                 notification,
                 "mRemoteNG - RDP file signing failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
+        }
+
+        private static string GetUserFriendlySigningFailure(Exception exception)
+        {
+            string message = exception.Message?.Trim() ?? "Unknown signing error.";
+            int firstLineEnd = message.IndexOfAny(['\r', '\n']);
+            if (firstLineEnd >= 0)
+                message = message[..firstLineEnd].Trim();
+
+            const int maxLength = 320;
+            return message.Length <= maxLength
+                ? message
+                : message[..maxLength].TrimEnd() + "...";
         }
 
         private static void SignRdpFile(string rdpPath, string thumbprint)
@@ -227,16 +243,21 @@ namespace mRemoteNG.Connection.Protocol.RDP
                     $"The configured RDP signing certificate thumbprint has {thumbprint.Length} hexadecimal characters; expected 40 for SHA-1 or 64 for SHA-256.")
             };
 
+            ValidateSigningCertificate(thumbprint);
+
             string signerExecutable = Path.Combine(Environment.SystemDirectory, "rdpsign.exe");
             if (!File.Exists(signerExecutable))
                 throw new FileNotFoundException("rdpsign.exe was not found, so the temporary RDP file could not be signed.", signerExecutable);
 
+            Encoding outputEncoding = GetRdpsignOutputEncoding();
             ProcessStartInfo signStartInfo = new(signerExecutable)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                StandardOutputEncoding = outputEncoding,
+                StandardErrorEncoding = outputEncoding,
                 WorkingDirectory = Environment.SystemDirectory
             };
             signStartInfo.ArgumentList.Add(hashArgument);
@@ -273,7 +294,84 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 throw new InvalidOperationException(
                     string.IsNullOrEmpty(details)
                         ? $"rdpsign.exe failed with exit code {signer.ExitCode}."
-                        : $"rdpsign.exe failed with exit code {signer.ExitCode}: {details}");
+                        : $"rdpsign.exe failed with exit code {signer.ExitCode}.{Environment.NewLine}{details}");
+            }
+        }
+
+        private static void ValidateSigningCertificate(string thumbprint)
+        {
+            bool certificateFound = false;
+            bool certificateWithPrivateKeyFound = false;
+            bool certificateIsCurrentlyValid = false;
+
+            foreach (StoreLocation storeLocation in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+            {
+                using X509Store store = new(StoreName.My, storeLocation);
+                try
+                {
+                    store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
+                }
+                catch (CryptographicException)
+                {
+                    continue;
+                }
+
+                foreach (X509Certificate2 certificate in store.Certificates)
+                {
+                    string certificateThumbprint = thumbprint.Length == 64
+                        ? NormalizeThumbprint(certificate.GetCertHashString(HashAlgorithmName.SHA256))
+                        : NormalizeThumbprint(certificate.Thumbprint);
+
+                    if (!string.Equals(certificateThumbprint, thumbprint, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    certificateFound = true;
+                    if (!certificate.HasPrivateKey)
+                        continue;
+
+                    certificateWithPrivateKeyFound = true;
+                    DateTime now = DateTime.Now;
+                    if (now < certificate.NotBefore || now > certificate.NotAfter)
+                        continue;
+
+                    certificateIsCurrentlyValid = true;
+                    break;
+                }
+
+                if (certificateIsCurrentlyValid)
+                    break;
+            }
+
+            if (!certificateFound)
+            {
+                throw new InvalidOperationException(
+                    "No certificate matching the configured RDP signing thumbprint was found in CurrentUser\\My or LocalMachine\\My. " +
+                    "Verify native-rdp-signing-thumbprint.txt and the certificate installation.");
+            }
+
+            if (!certificateWithPrivateKeyFound)
+            {
+                throw new InvalidOperationException(
+                    "The configured RDP signing certificate was found, but its private key is not available to the current user.");
+            }
+
+            if (!certificateIsCurrentlyValid)
+            {
+                throw new InvalidOperationException(
+                    "The configured RDP signing certificate is expired or not yet valid.");
+            }
+        }
+
+        private static Encoding GetRdpsignOutputEncoding()
+        {
+            try
+            {
+                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+                return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
+            }
+            catch
+            {
+                return Encoding.UTF8;
             }
         }
 
