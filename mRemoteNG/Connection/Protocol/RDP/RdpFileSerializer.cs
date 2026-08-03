@@ -286,8 +286,14 @@ namespace mRemoteNG.Connection.Protocol.RDP
 
         private static void AddString(ICollection<string> lines, string key, string? value)
         {
-            if (!string.IsNullOrEmpty(value))
-                lines.Add($"{key}:s:{value}");
+            if (string.IsNullOrEmpty(value))
+                return;
+
+            string safeValue = value
+                .Replace('\r', ' ')
+                .Replace('\n', ' ')
+                .Replace('\0', ' ');
+            lines.Add($"{key}:s:{safeValue}");
         }
     }
 }
