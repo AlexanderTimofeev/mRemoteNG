@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -166,6 +166,10 @@ namespace mRemoteNG.Config.Serializers.ConnectionSerializers.Sql
             if (!dataRow.IsNull("RdpVersion")) // table allows null values which must be handled
                 if (Enum.TryParse((string)dataRow["RdpVersion"], true, out RdpVersion rdpVersion))
                     connectionInfo.RdpVersion = rdpVersion;
+
+            if (dataRow.Table.Columns.Contains("RdpClientMode") && !dataRow.IsNull("RdpClientMode"))
+                if (Enum.TryParse((string)dataRow["RdpClientMode"], true, out RdpClientMode rdpClientMode))
+                    connectionInfo.RdpClientMode = rdpClientMode;
 
             //connectionInfo.Inheritance.ExternalCredentialProvider = MiscTools.GetBooleanValue(dataRow["InheritExternalCredentialProvider"]);
             //connectionInfo.Inheritance.RDGatewayExternalCredentialProvider = MiscTools.GetBooleanValue(dataRow["InheritRDGatewayExternalCredentialProvider"]);
