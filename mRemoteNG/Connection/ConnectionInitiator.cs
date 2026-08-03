@@ -96,7 +96,7 @@ namespace mRemoteNG.Connection
                 if (connectionInfo.Protocol == ProtocolType.RDP &&
                     connectionInfo.RdpClientMode == RdpClientMode.NativeMstsc)
                 {
-                    if (!string.IsNullOrEmpty(connectionInfoOriginal.SSHTunnelConnectionName))
+                    if (!string.IsNullOrEmpty(connectionInfo.SSHTunnelConnectionName))
                     {
                         Runtime.MessageCollector.AddMessage(
                             MessageClass.WarningMsg,
