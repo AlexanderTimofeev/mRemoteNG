@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using mRemoteNG.App;
 using mRemoteNG.Messages;
 
@@ -10,6 +11,10 @@ namespace mRemoteNG.Connection.Protocol.RDP
 {
     public sealed class NativeRdpLauncher
     {
+        private const string SigningThumbprintEnvironmentVariable = "MREMOTENG_RDP_SIGN_CERT_THUMBPRINT";
+        private const string SigningThumbprintFileName = "native-rdp-signing-thumbprint.txt";
+        private static readonly TimeSpan SigningTimeout = TimeSpan.FromSeconds(30);
+
         private readonly TemporaryRdpFileStore _fileStore;
 
         public NativeRdpLauncher()
@@ -74,6 +79,8 @@ namespace mRemoteNG.Connection.Protocol.RDP
                         includeGatewayAccessToken),
                     connectionInfo.Name);
 
+                bool signed = SignRdpFileIfConfigured(rdpPath);
+
                 ProcessStartInfo startInfo = new(executable)
                 {
                     UseShellExecute = false,
@@ -89,7 +96,11 @@ namespace mRemoteNG.Connection.Protocol.RDP
                 TemporaryRdpFileStore.ScheduleDelete(rdpPath);
                 Runtime.MessageCollector.AddMessage(
                     MessageClass.InformationMsg,
-                    string.Format(CultureInfo.InvariantCulture, "Launched mstsc.exe for RDP connection '{0}'.", connectionInfo.Name));
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Launched mstsc.exe for RDP connection '{0}'{1}.",
+                        connectionInfo.Name,
+                        signed ? " using a signed RDP file" : string.Empty));
                 return true;
             }
             catch (Exception ex)
@@ -128,6 +139,93 @@ namespace mRemoteNG.Connection.Protocol.RDP
         {
             string host = (hostname ?? string.Empty).Trim().TrimStart('[').TrimEnd(']');
             return $"TERMSRV/{host}";
+        }
+
+        internal static string GetSigningThumbprintFilePath() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "mRemoteNG",
+            SigningThumbprintFileName);
+
+        internal static string ResolveSigningThumbprint()
+        {
+            string? configuredValue = Environment.GetEnvironmentVariable(SigningThumbprintEnvironmentVariable);
+            if (string.IsNullOrWhiteSpace(configuredValue))
+            {
+                string thumbprintFilePath = GetSigningThumbprintFilePath();
+                if (File.Exists(thumbprintFilePath))
+                    configuredValue = File.ReadAllText(thumbprintFilePath);
+            }
+
+            return NormalizeThumbprint(configuredValue);
+        }
+
+        internal static string NormalizeThumbprint(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            return new string(value
+                .Where(character => Uri.IsHexDigit(character))
+                .Select(char.ToUpperInvariant)
+                .ToArray());
+        }
+
+        private static bool SignRdpFileIfConfigured(string rdpPath)
+        {
+            string thumbprint = ResolveSigningThumbprint();
+            if (string.IsNullOrEmpty(thumbprint))
+                return false;
+
+            string signerExecutable = Path.Combine(Environment.SystemDirectory, "rdpsign.exe");
+            if (!File.Exists(signerExecutable))
+                throw new FileNotFoundException("rdpsign.exe was not found, so the temporary RDP file could not be signed.", signerExecutable);
+
+            ProcessStartInfo signStartInfo = new(signerExecutable)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                WorkingDirectory = Environment.SystemDirectory
+            };
+            signStartInfo.ArgumentList.Add("/sha256");
+            signStartInfo.ArgumentList.Add(thumbprint);
+            signStartInfo.ArgumentList.Add("/q");
+            signStartInfo.ArgumentList.Add(rdpPath);
+
+            using Process signer = Process.Start(signStartInfo)
+                ?? throw new InvalidOperationException("rdpsign.exe did not return a process instance.");
+
+            string standardOutput = signer.StandardOutput.ReadToEnd();
+            string standardError = signer.StandardError.ReadToEnd();
+            if (!signer.WaitForExit((int)SigningTimeout.TotalMilliseconds))
+            {
+                try
+                {
+                    signer.Kill();
+                }
+                catch
+                {
+                    // Best effort. The process will terminate with the application if necessary.
+                }
+
+                throw new TimeoutException("Signing the temporary RDP file timed out after 30 seconds.");
+            }
+
+            if (signer.ExitCode != 0)
+            {
+                string details = string.Join(
+                    Environment.NewLine,
+                    new[] { standardError, standardOutput }
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Select(value => value.Trim()));
+                throw new InvalidOperationException(
+                    string.IsNullOrEmpty(details)
+                        ? $"rdpsign.exe failed with exit code {signer.ExitCode}."
+                        : $"rdpsign.exe failed with exit code {signer.ExitCode}: {details}");
+            }
+
+            return true;
         }
 
         private static bool HasConfiguredGateway(ConnectionInfo connectionInfo) =>
