@@ -1,0 +1,59 @@
+name: Validate native RDP migration
+
+on:
+  push:
+    branches:
+      - v1.78.2-dev
+    paths:
+      - .github/workflows/validate-native-rdp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/native-mstsc-launch
+          fetch-depth: 0
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore, build and test
+        shell: pwsh
+        run: |
+          $report = "native-rdp-migration-build.txt"
+          "Native RDP migration validation" | Set-Content $report
+          "UTC: $([DateTime]::UtcNow.ToString('O'))" | Add-Content $report
+          "HEAD: $(git rev-parse HEAD)" | Add-Content $report
+
+          dotnet restore mRemoteNG.sln 2>&1 | Tee-Object -FilePath $report -Append
+          $restoreExit = $LASTEXITCODE
+          "RESTORE_EXIT=$restoreExit" | Add-Content $report
+
+          $buildExit = -1
+          $testExit = -1
+          if ($restoreExit -eq 0) {
+            dotnet build mRemoteNG.sln --configuration Debug -p:Platform=x64 --no-restore 2>&1 | Tee-Object -FilePath $report -Append
+            $buildExit = $LASTEXITCODE
+          }
+          "BUILD_EXIT=$buildExit" | Add-Content $report
+
+          if ($buildExit -eq 0) {
+            dotnet test mRemoteNGTests/mRemoteNGTests.csproj --configuration Debug -p:Platform=x64 --no-build --no-restore 2>&1 | Tee-Object -FilePath $report -Append
+            $testExit = $LASTEXITCODE
+          }
+          "TEST_EXIT=$testExit" | Add-Content $report
+          "VALIDATION_COMPLETE=1" | Add-Content $report
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $report
+          git commit -m "chore: record native RDP migration validation"
+          git push origin HEAD:agent/native-mstsc-launch
